@@ -1,0 +1,7 @@
+[package]
+name = "spc700-rs"
+version = "0.1.0"
+authors = ["soya <ohnishi.soya@arc.cs.okayama-u.ac.jp>"]
+edition = "2018"
+
+[dependencies]
