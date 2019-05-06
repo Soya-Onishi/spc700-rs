@@ -6,24 +6,26 @@ pub use self::addressing::Addressing;
 
 pub struct Instruction {
   pub opcode: Opcode,
+  pub raw_op: u8,
   pub op0: Addressing,
   pub op1: Addressing,
   pub cycle: u8,
 }
 
 impl Instruction {
-  pub const fn new(opcode: Opcode, op0: Addressing, op1: Addressing, cycle: u8) -> Instruction {
+  pub const fn new(raw_op: u8, opcode: Opcode, op0: Addressing, op1: Addressing, cycle: u8) -> Instruction {
     Instruction {
-      opcode, op0, op1, cycle
+      opcode, raw_op, op0, op1, cycle
     }
   }
 
   pub fn decode (value: u8) -> Instruction {
     Instruction::new(
-      self::opcode::OPCODE_TABLE[value as usize],
+      value,
+      self::opcode::OPCODE_TABLE[value as usize],      
       self::addressing::ADDRESSING_OP0_TABLE[value as usize],
       self::addressing::ADDRESSING_OP1_TABLE[value as usize],
-      self::opcode::INST_CYCLE_TABLE[value as usize]
+      self::opcode::INST_CYCLE_TABLE[value as usize]      
     )
   }
 }
