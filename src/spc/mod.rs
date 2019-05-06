@@ -262,6 +262,7 @@ impl Spc700 {
     let op1 = self.read(op1_sub);
 
     let res = op0 | op1;
+    
     self.write(op0_sub, res);
   }
 }
