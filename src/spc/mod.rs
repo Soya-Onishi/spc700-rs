@@ -254,15 +254,54 @@ impl Spc700 {
     self.write(dst, source);
   }
 
-  fn or(&mut self, inst: &Instruction) {
+  fn alu_command(&mut self, inst: &Instruction, operation: impl Fn(u16, u16) -> u16) {
     let op1_sub = self.gen_subject(inst.op1);
     let op0_sub = self.gen_subject(inst.op0);
 
     let op0 = self.read(op0_sub);
     let op1 = self.read(op1_sub);
 
-    let res = op0 | op1;
+    let res = operation(op0, op1);
+
+    if inst.opcode != Opcode::CMP {
+      self.write(op0_sub, res);
+    }
+  }
+
+  fn eight_bit_command(&mut self, inst: &Instruction, operation: impl Fn(u16) -> u16) {
+    let op0_sub = self.gen_subject(inst.op0);
+    let op0 = self.read(op0_sub);
+
+    let res = operation(op0);
+
+    self.write(op0_sub, res);
+  }
+
+  fn sixteen_bit_command(&mut self, inst: &Instruction, operation: impl Fn(u16, u16) -> u16) {
+    let op1_sub = self.gen_subject(inst.op1);
+    let op0_sub = self.gen_subject(inst.op0);
+
+    let op0 = self.read(op0_sub);
+    let op1 = self.read(op1_sub);
+
+    let res = operation(op0, op1);
+
+    self.write(op0_sub, res);
+  }
+
+  fn one_bit_command(&mut self, inst: &Instruction, operation: impl Fn(u16, u16) -> u16) {
+    let op1_sub = self.gen_subject(inst.op1);
+    let op0_sub = self.gen_subject(inst.op0);
+
+    let op0 = self.read(op0_sub);
+    let op1 = match inst.opcode {
+      Opcode::SET1 => { ((inst.raw_op - 0x12) >> 5) as u16 }
+      Opcode::CLR1 => { ((inst.raw_op - 0x02) >> 5) as u16 }
+      _ => { self.read(op1_sub) }
+    };
     
+    let res = operation(op0, op1);
+
     self.write(op0_sub, res);
   }
 }
