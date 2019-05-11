@@ -1,8 +1,10 @@
 pub mod instruction;
+pub mod flags;
 
 use self::instruction::Addressing;
 use self::instruction::Opcode;
 use self::instruction::Instruction;
+use self::flags::Flags;
 
 enum Subject {
   Addr(u16),
@@ -33,6 +35,14 @@ impl Spc700 {
 
     match inst.opcode {
       Opcode::MOV => { self.mov(&inst); }
+      Opcode::MOVW => { self.movw(&inst); }
+      Opcode::PUSH => { self.push(&inst); }
+      Opcode::POP => { self.pop(&inst); }
+      Opcode::OR => { self.alu_command(&inst, |op0, op1| { op0 | op1 }) }
+      Opcode::AND => { self.alu_command(&inst, |op0, op1| { op0 & op1 } )}
+      Opcode::EOR => { self.alu_command(&inst, |op0, op1| { op0 ^ op1 } )}
+      Opcode::CMP => { self.alu_command(&inst, |op0, op1| { if op0 < op1 { 1 } else { 0 } }) }
+      Opcode::ADC => { self.alu_command}
     }
   }
 
@@ -81,7 +91,7 @@ impl Spc700 {
       Addressing::YA   => { Subject::YA }
       Addressing::SP   => { Subject::SP }
       Addressing::PSW(_)  => { Subject::PSW }
-      Addressing::Abs => { Subject::Addr(self.incl_pc()) }
+      Addressing::Abs => { Subject::Addr(self.incl_pc()) } 
       Addressing::AbsX => {
         let abs = self.read_ram_word(self.incl_pc());
         let addr = self.add_prefix_addr(abs + self.x);
@@ -197,7 +207,6 @@ impl Spc700 {
   }
   
   fn mov(&mut self, inst: &Instruction) {
-    // TODO: mov operation implement
     match inst.op0 {
       Addressing::Special => {
         match inst.raw_op {
@@ -207,7 +216,6 @@ impl Spc700 {
             
             self.write(addr, a);
 
-            // TODO: probably need one more cycle
             self.x = self.x.wrapping_add(1);
           }
           0xBF => {
@@ -215,8 +223,7 @@ impl Spc700 {
             let x = self.read(addr);
             
             self.write(Subject::A, x);
-
-            // TODO: probably need one more cycle
+            
             self.x = self.x.wrapping_add(1);
           }
           _ => {
@@ -232,6 +239,21 @@ impl Spc700 {
         self.write(op0_addr, op1);
       }
     }    
+  }
+
+  fn movw(&mut self, inst: &Instruction) {
+    let src_lo_subject = self.gen_subject(inst.op1);
+    let src_hi_subject = match src_lo_subject {
+      Subject::Addr(addr) => { Subject::Addr(addr.wrapping_add(1)) }
+      _ => { Subject::None }
+    };
+
+    let src_lo = self.read(src_lo_subject) as u16;
+    let src_hi = self.read(src_hi_subject) as u16;
+    let src =  (src_hi << 8) | src_lo;
+    let dst = self.gen_subject(inst.op0);
+
+    self.write(dst, src);
   }
  
   fn push(&mut self, inst: &Instruction) {
@@ -299,9 +321,24 @@ impl Spc700 {
       Opcode::CLR1 => { ((inst.raw_op - 0x02) >> 5) as u16 }
       _ => { self.read(op1_sub) }
     };
-    
+
     let res = operation(op0, op1);
 
     self.write(op0_sub, res);
+  }
+
+  fn adc(&self, op0: u8, op1: u8) -> u8 {
+    let c: u16 = if self.pwd.c { 1 } else { 0 };
+
+    let op0 = op0 as u16;
+    let op1 = op1 as u16;
+    let res = op0 + op1 + c;
+
+    // TODO: Implement renewing flag register
+    let is_half_carry = ((op0 ^ op1 ^ res) & 0x10) == 1;
+    let is_carry = res > 0xff;
+    let is_overflow = (!(op0 ^ op1) & (op0 ^ res) & 0x80) == 1;
+
+    res as u8
   }
 }
