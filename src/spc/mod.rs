@@ -6,6 +6,7 @@ use self::instruction::Opcode;
 use self::instruction::Instruction;
 use self::flags::Flags;
 
+#[derive(Copy, Clone)]
 enum Subject {
   Addr(u16),
   Bit(u16, u8),
@@ -23,7 +24,7 @@ struct Spc700 {
   x: u8,
   y: u8,
   sp: u8,
-  psw: u8,
+  psw: Flags,
   pc: u16,
 }
 
@@ -41,8 +42,9 @@ impl Spc700 {
       Opcode::OR => { self.alu_command(&inst, |op0, op1| { op0 | op1 }) }
       Opcode::AND => { self.alu_command(&inst, |op0, op1| { op0 & op1 } )}
       Opcode::EOR => { self.alu_command(&inst, |op0, op1| { op0 ^ op1 } )}
-      Opcode::CMP => { self.alu_command(&inst, |op0, op1| { if op0 < op1 { 1 } else { 0 } }) }
-      Opcode::ADC => { self.alu_command}
+      Opcode::CMP => { self.alu_command(&inst, self.cmp) }
+      Opcode::ADC => { self.alu_command(&inst, self.adc) }
+      Opcode::SBC => { self.alu_command(&inst, self.sbc)}
     }
   }
 
@@ -171,7 +173,7 @@ impl Spc700 {
           Subject::A => { self.a }
           Subject::X => { self.x }
           Subject::Y => { self.y }
-          Subject::PSW => { self.psw }
+          Subject::PSW => { self.psw.get() }
           _ => { 0 }           
         };
 
@@ -199,7 +201,7 @@ impl Spc700 {
           Subject::A => { self.a = byte; }
           Subject::X => { self.x = byte; }
           Subject::Y => { self.y = byte; }
-          Subject::PSW => { self.psw = byte; }
+          Subject::PSW => { self.psw.set(byte); }
           _ => {}
         }
       }
@@ -207,7 +209,12 @@ impl Spc700 {
   }
   
   fn mov(&mut self, inst: &Instruction) {
-    match inst.op0 {
+    fn set_flag(spc: &mut Spc700, value: u8) {
+      spc.psw.set_sign((value >> 7) & 0x1 == 1);
+      spc.psw.set_zero(value == 0);
+    }
+
+    let assigned_value = match inst.op0 {
       Addressing::Special => {
         match inst.raw_op {
           0xAF => {
@@ -215,21 +222,22 @@ impl Spc700 {
             let a = self.read(Subject::A);
             
             self.write(addr, a);
-
             self.x = self.x.wrapping_add(1);
+
+            a
           }
           0xBF => {
             let addr = self.gen_subject(Addressing::IndX);
             let x = self.read(addr);
             
             self.write(Subject::A, x);
-            
             self.x = self.x.wrapping_add(1);
+
+            x
           }
           _ => {
             panic!("This is bug");
           }
-
         }
       }
       _ => {
@@ -237,8 +245,17 @@ impl Spc700 {
         let op1 = self.read(self.gen_subject(inst.op1));
 
         self.write(op0_addr, op1);
+
+        op1
       }
-    }    
+    };
+
+    match inst.op0 {
+      Addressing::A => { set_flag(&mut self, assigned_value as u8) }
+      Addressing::X => { set_flag(&mut self, assigned_value as u8) }
+      Addressing::Y => { set_flag(&mut self, assigned_value as u8) }
+      _ => {}
+    }
   }
 
   fn movw(&mut self, inst: &Instruction) {
@@ -254,6 +271,14 @@ impl Spc700 {
     let dst = self.gen_subject(inst.op0);
 
     self.write(dst, src);
+
+    match inst.op0 {
+      Addressing::YA => {
+        self.psw.set_sign((src >> 15) & 0x1 == 1);
+        self.psw.set_zero(src == 0);
+      }
+      _ => {}
+    }
   }
  
   fn push(&mut self, inst: &Instruction) {
@@ -276,7 +301,7 @@ impl Spc700 {
     self.write(dst, source);
   }
 
-  fn alu_command(&mut self, inst: &Instruction, operation: impl Fn(u16, u16) -> u16) {
+  fn alu_command(&mut self, inst: &Instruction, operation: &Fn(u16, u16) -> u16) {
     let op1_sub = self.gen_subject(inst.op1);
     let op0_sub = self.gen_subject(inst.op0);
 
@@ -288,6 +313,9 @@ impl Spc700 {
     if inst.opcode != Opcode::CMP {
       self.write(op0_sub, res);
     }
+
+    self.psw.set_sign((res >> 7) & 0x1 == 1);
+    self.psw.set_zero(res == 0);
   }
 
   fn eight_bit_command(&mut self, inst: &Instruction, operation: impl Fn(u16) -> u16) {
@@ -327,18 +355,87 @@ impl Spc700 {
     self.write(op0_sub, res);
   }
 
-  fn adc(&self, op0: u8, op1: u8) -> u8 {
-    let c: u16 = if self.pwd.c { 1 } else { 0 };
+  fn cmp(&mut self, op0: u16, op1: u16) -> u16 {
+    let res = op0 - op1;
 
-    let op0 = op0 as u16;
-    let op1 = op1 as u16;
-    let res = op0 + op1 + c;
+    self.psw.set_carry(res > 0xff);
 
-    // TODO: Implement renewing flag register
-    let is_half_carry = ((op0 ^ op1 ^ res) & 0x10) == 1;
-    let is_carry = res > 0xff;
-    let is_overflow = (!(op0 ^ op1) & (op0 ^ res) & 0x80) == 1;
+    0
+  }
 
-    res as u8
+  fn adc(&mut self, op0: u16, op1: u16) -> u16 {
+    let c: u16 = if self.psw.carry() { 1 } else { 0 };
+
+    let res = op0.wrapping_add(op1).wrapping_add(c);
+
+    self.psw.set_half(((op0 ^ op1 ^ res) & 0x10) == 1);
+    self.psw.set_carry(res > 0xff);
+    self.psw.set_overflow((!(op0 ^ op1) & (op0 ^ res) & 0x80) == 1);
+    
+    res & 0xff
+  }
+
+  fn sbc(&mut self, op0: u16, op1: u16) -> u16 {
+    let res = self.adc(op0, !op1 & 0xff);
+
+    res & 0xff
+  }
+
+  fn asl(&mut self, op0: u16) -> u16 {
+    let res = op0 << 1;
+
+    self.psw.set_carry(res & 0x100 == 1);
+
+    res & 0xff
+  }
+
+  fn rol(&mut self, op0: u16) -> u16 {
+    let c: u16 = if self.psw.carry() { 1 } else { 0 };
+    let res = op0 << 1 | c;
+
+    self.psw.set_carry(res & 0x100 == 1);
+
+    res & 0xff
+  }
+
+  fn lsr(&mut self, op0: u16) -> u16 {
+    let res = op0 >> 1;
+
+    self.psw.set_carry(op0 & 0x1 == 1);
+
+    res & 0xff
+  }
+
+  fn ror(&mut self, op0: u16) -> u16 {
+    let c: u16 = if self.psw.carry() { 0x80 } else { 0 };
+    let res = op0 >> 1 | c;
+
+    self.psw.set_carry(op0 & 0x1 == 0);
+
+    res & 0xff
+  }
+
+  fn inc(&mut self, op0: u16) -> u16 {
+    op0.wrapping_add(1) & 0xff
+  }
+
+  fn dec(&mut self, op0: u16) -> u16 {
+    op0.wrapping_sub(1) & 0xff
+  }
+
+  fn addw(&mut self, op0: u16, op1: u16) -> u16 {
+    self.psw.negate_carry();
+    let low  = self.adc(op0 & 0xff, op1 & 0xff);
+    let high = self.adc((op0 >> 8) & 0xff, (op1 >> 8) & 0xff);
+
+    (high << 8) | low
+  }
+
+  fn subw(&mut self, op0: u16, op1: u16) -> u16 {
+    self.psw.assert_carry();
+    let low = self.sbc(op0 & 0xff, op1 & 0xff);
+    let high = self.sbc((op0 >> 8) & 0xff, (op1 >> 8) & 0xff);
+
+    (high << 8) | low
   }
 }
