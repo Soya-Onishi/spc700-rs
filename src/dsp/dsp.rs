@@ -1,3 +1,3 @@
 struct Dsp {
-  counter: u16,
+    counter: u16,
 }

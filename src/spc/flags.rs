@@ -67,11 +67,11 @@ impl Flags {
         let z = convert!(z) << 1;
         let c = convert!(c) << 0;
 
-        n | v | p | b | h | i | z | c        
+        n | v | p | b | h | i | z | c
     }
 
     pub fn set(&mut self, pwd: u8) {
-        fn convert(pwd: u8, location: u8) -> bool {            
+        fn convert(pwd: u8, location: u8) -> bool {
             let bit = (pwd >> location) & 0x1;
             bit == 1
         }
