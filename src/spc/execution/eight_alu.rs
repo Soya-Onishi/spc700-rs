@@ -21,17 +21,30 @@ fn bitwise(op0: u8, op1: u8, f: impl Fn(u8, u8) -> u8) -> (u8, u8) {
     (res, flag)
 }
 
+pub fn cmp(op0: u8, op1: u8) -> (u8, u8) {
+    let res = op0.wrapping_sub(op1);
+
+    let mask = 0b1000_0011;
+    let sign = is_sign(res);
+    let zero = is_zero(res);
+    let carry = is_carry(op0, res);
+    let flag = (sign | zero | carry) & mask;
+
+    (res, flag)
+}
+
 pub fn adc(op0: u8, op1: u8, carry_flag: bool) -> (u8, u8) {
     let c: u16 = if carry_flag { 1 } else { 0 };
 
     let res = op0.wrapping_add(op1).wrapping_add(c);
 
+    let mask = 0b1100_1011;
     let zero = is_zero(res);
     let sign = is_sign(res);
     let half = is_half(op0, op1, res);
     let carry = is_carry(op0, res);
     let overflow = is_overflow(op0, op1, res);
-    let flag = zero | sign | half | carry | overflow;
+    let flag = (zero | sign | half | carry | overflow) & mask;
 
     (res, flag)
 }
