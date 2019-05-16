@@ -157,7 +157,7 @@ impl Spc700 {
         }
     }
 
-    fn read(&self, subject: Subject) -> u16 {
+    fn read_word(&self, subject: Subject) -> u16 {
         match subject {
             Subject::YA => {
                 let msb = self.y as u16;
@@ -165,24 +165,36 @@ impl Spc700 {
 
                 (msb << 8) | lsb
             }
-            _ => {
-                let byte = match subject {
-                    Subject::SP => { self.sp }
-                    Subject::Addr(addr) => { self.read_ram_word(addr) }
-                    Subject::Bit(addr, _) => { self.read_ram_word(addr) }
-                    Subject::A => { self.a }
-                    Subject::X => { self.x }
-                    Subject::Y => { self.y }
-                    Subject::PSW => { self.psw.get() }
-                    _ => { 0 }
-                };
+            Subject::Addr(addr) => {
+                let lsb = self.read_ram_word(addr) as u16;
+                let msb = self.read_ram_word(addr.wrapping_add(1)) as u16;
 
-                byte as u16
+                (msb << 8) | lsb
+            }
+            None => {
+                0
+            }
+            _ => {
+                panic!("not allowed subject");
             }
         }
     }
 
-    fn write(&mut self, subject: Subject, word: u16) {
+    fn read_byte(&self, subject: Subject) -> u8 {
+        match subject {
+            Subject::SP => { self.sp }
+            Subject::Addr(addr) => { self.read_ram_word(addr) }
+            Subject::Bit(addr, _) => { self.read_ram_word(addr) }
+            Subject::A => { self.a }
+            Subject::X => { self.x }
+            Subject::Y => { self.y }
+            Subject::PSW => { self.psw.get() }
+            Subject::None => { 0 }
+            _ => { panic!("not allowed subject"); }
+        }
+    }
+
+    fn write_word(&mut self, subject: Subject, word: u16) {
         match subject {
             Subject::YA => {
                 let y = (word >> 8) as u8;
@@ -191,19 +203,37 @@ impl Spc700 {
                 self.y = y;
                 self.a = a;
             }
-            _ => {
-                let byte = (word & 0x00ff) as u8;
+            Subject::Addr(addr) => {
+                let next_addr = addr.wrapping_add(1);
+                let low = (word & 0xff) as u8;
+                let high = ((word >> 8) & 0xff) as u8;
 
-                match subject {
-                    Subject::SP => { self.sp = byte; }
-                    Subject::Addr(addr) => { self.write_ram_word(addr, byte); }
-                    Subject::Bit(addr, _) => { self.write_ram_word(addr, byte); }
-                    Subject::A => { self.a = byte; }
-                    Subject::X => { self.x = byte; }
-                    Subject::Y => { self.y = byte; }
-                    Subject::PSW => { self.psw.set(byte); }
-                    _ => {}
-                }
+                self.write_ram_word(addr, low);
+                self.write_ram_word(addr, high);
+            }
+            Subject::None => {
+                // nothing to do
+            }
+            _ => {
+                panic!("not allowed subject");
+            }
+        }
+    }
+
+    fn write_byte(&mut self, subject: Subject, byte: u8) {
+        match subject {
+            Subject::SP => { self.sp = byte; }
+            Subject::Addr(addr) => { self.write_ram_byte(addr, byte); }
+            Subject::Bit(addr, _) => { self.write_ram_byte(addr, byte); }
+            Subject::A => { self.a = byte; }
+            Subject::X => { self.x = byte; }
+            Subject::Y => { self.y = byte; }
+            Subject::PSW => { self.psw.set(byte); }
+            Subject::None => {
+                // nothing to do
+            }
+            _ => {
+                panic!("not allowed subject");
             }
         }
     }
@@ -219,18 +249,18 @@ impl Spc700 {
                 match inst.raw_op {
                     0xAF => {
                         let addr = self.gen_subject(Addressing::IndX);
-                        let a = self.read(Subject::A);
+                        let a = self.read_byte(Subject::A);
 
-                        self.write(addr, a);
+                        self.write_byte(addr, a);
                         self.x = self.x.wrapping_add(1);
 
                         a
                     }
                     0xBF => {
                         let addr = self.gen_subject(Addressing::IndX);
-                        let x = self.read(addr);
+                        let x = self.read_byte(addr);
 
-                        self.write(Subject::A, x);
+                        self.write_byte(Subject::A, x);
                         self.x = self.x.wrapping_add(1);
 
                         x
@@ -242,35 +272,29 @@ impl Spc700 {
             }
             _ => {
                 let op0_addr = self.gen_subject(inst.op0);
-                let op1 = self.read(self.gen_subject(inst.op1));
+                let op1 = self.read_byte(self.gen_subject(inst.op1));
 
-                self.write(op0_addr, op1);
+                self.write_byte(op0_addr, op1);
 
                 op1
             }
         };
 
         match inst.op0 {
-            Addressing::A => { set_flag(&mut self, assigned_value as u8) }
-            Addressing::X => { set_flag(&mut self, assigned_value as u8) }
-            Addressing::Y => { set_flag(&mut self, assigned_value as u8) }
+            Addressing::A => { set_flag(&mut self, assigned_value) }
+            Addressing::X => { set_flag(&mut self, assigned_value) }
+            Addressing::Y => { set_flag(&mut self, assigned_value) }
             _ => {}
         }
     }
 
     fn movw(&mut self, inst: &Instruction) {
-        let src_lo_subject = self.gen_subject(inst.op1);
-        let src_hi_subject = match src_lo_subject {
-            Subject::Addr(addr) => { Subject::Addr(addr.wrapping_add(1)) }
-            _ => { Subject::None }
-        };
+        let subject = self.gen_subject(inst.op1);
+        let src = self.read_word(subject);
 
-        let src_lo = self.read(src_lo_subject) as u16;
-        let src_hi = self.read(src_hi_subject) as u16;
-        let src = (src_hi << 8) | src_lo;
         let dst = self.gen_subject(inst.op0);
 
-        self.write(dst, src);
+        self.write_word(dst, src);
 
         match inst.op0 {
             Addressing::YA => {
@@ -282,10 +306,10 @@ impl Spc700 {
     }
 
     fn push(&mut self, inst: &Instruction) {
-        let source = self.read(self.gen_subject(inst.op0));
+        let src = self.read_byte(self.gen_subject(inst.op0));
         let sp_addr = Subject::Addr(0x0100 | (self.sp as u16));
 
-        self.write(sp_addr, source);
+        self.write_byte(sp_addr, src);
 
         self.sp.wrapping_sub(1);
     }
@@ -293,69 +317,70 @@ impl Spc700 {
     fn pop(&mut self, inst: &Instruction) {
         self.sp.wrapping_add(1);
 
+
         let sp_addr = Subject::Addr(0x0100 | (self.sp as u16));
-        let source = self.read(sp_addr);
+        let src = self.read_byte(sp_addr);
 
         let dst = self.gen_subject(inst.op0);
 
-        self.write(dst, source);
+        self.write_byte(dst, src);
     }
 
-    fn alu_command(&mut self, inst: &Instruction, operation: &Fn(u16, u16) -> u16) {
+    fn alu_command(&mut self, inst: &Instruction, operation: &Fn(u8, u8) -> u8) {
         let op1_sub = self.gen_subject(inst.op1);
         let op0_sub = self.gen_subject(inst.op0);
 
-        let op0 = self.read(op0_sub);
-        let op1 = self.read(op1_sub);
+        let op0 = self.read_byte(op0_sub);
+        let op1 = self.read_byte(op1_sub);
 
         let res = operation(op0, op1);
 
         if inst.opcode != Opcode::CMP {
-            self.write(op0_sub, res);
+            self.write_byte(op0_sub, res);
         }
 
         self.psw.set_sign((res >> 7) & 0x1 == 1);
         self.psw.set_zero(res == 0);
     }
 
-    fn eight_bit_command(&mut self, inst: &Instruction, operation: impl Fn(u16) -> u16) {
+    fn eight_bit_command(&mut self, inst: &Instruction, operation: impl Fn(u8) -> u8) {
         let op0_sub = self.gen_subject(inst.op0);
-        let op0 = self.read(op0_sub);
+        let op0 = self.read_byte(op0_sub);
 
         let res = operation(op0);
 
-        self.write(op0_sub, res);
+        self.write_byte(op0_sub, res);
     }
 
     fn sixteen_bit_command(&mut self, inst: &Instruction, operation: impl Fn(u16, u16) -> u16) {
         let op1_sub = self.gen_subject(inst.op1);
         let op0_sub = self.gen_subject(inst.op0);
 
-        let op0 = self.read(op0_sub);
-        let op1 = self.read(op1_sub);
+        let op0 = self.read_word(op0_sub);
+        let op1 = self.read_word(op1_sub);
 
         let res = operation(op0, op1);
 
-        self.write(op0_sub, res);
+        self.write_word(op0_sub, res);
     }
 
-    fn one_bit_command(&mut self, inst: &Instruction, operation: impl Fn(u16, u16) -> u16) {
+    fn one_bit_command(&mut self, inst: &Instruction, operation: impl Fn(u8, u8) -> u8) {
         let op1_sub = self.gen_subject(inst.op1);
         let op0_sub = self.gen_subject(inst.op0);
 
-        let op0 = self.read(op0_sub);
+        let op0 = self.read_byte(op0_sub);
         let op1 = match inst.opcode {
-            Opcode::SET1 => { ((inst.raw_op - 0x12) >> 5) as u16 }
-            Opcode::CLR1 => { ((inst.raw_op - 0x02) >> 5) as u16 }
-            _ => { self.read(op1_sub) }
+            Opcode::SET1 => { ((inst.raw_op - 0x12) >> 5) }
+            Opcode::CLR1 => { ((inst.raw_op - 0x02) >> 5) }
+            _ => { self.read_byte(op1_sub) }
         };
 
         let res = operation(op0, op1);
 
-        self.write(op0_sub, res);
+        self.write_byte(op0_sub, res);
     }
 
-    fn cmp(&mut self, op0: u16, op1: u16) -> u16 {
+    fn cmp(&mut self, op0: u8, op1: u8) -> u8 {
         let res = op0 - op1;
 
         self.psw.set_carry(res > 0xff);
@@ -363,7 +388,7 @@ impl Spc700 {
         0
     }
 
-    fn adc(&mut self, op0: u16, op1: u16) -> u16 {
+    fn adc(&mut self, op0: u8, op1: u8) -> u8 {
         let c: u16 = if self.psw.carry() { 1 } else { 0 };
 
         let res = op0.wrapping_add(op1).wrapping_add(c);
@@ -375,13 +400,13 @@ impl Spc700 {
         res & 0xff
     }
 
-    fn sbc(&mut self, op0: u16, op1: u16) -> u16 {
+    fn sbc(&mut self, op0: u8, op1: u8) -> u8 {
         let res = self.adc(op0, !op1 & 0xff);
 
         res & 0xff
     }
 
-    fn asl(&mut self, op0: u16) -> u16 {
+    fn asl(&mut self, op0: u8) -> u8 {
         let res = op0 << 1;
 
         self.psw.set_carry(res & 0x100 == 1);
@@ -389,7 +414,7 @@ impl Spc700 {
         res & 0xff
     }
 
-    fn rol(&mut self, op0: u16) -> u16 {
+    fn rol(&mut self, op0: u8) -> u8 {
         let c: u16 = if self.psw.carry() { 1 } else { 0 };
         let res = op0 << 1 | c;
 
@@ -398,7 +423,7 @@ impl Spc700 {
         res & 0xff
     }
 
-    fn lsr(&mut self, op0: u16) -> u16 {
+    fn lsr(&mut self, op0: u8) -> u8 {
         let res = op0 >> 1;
 
         self.psw.set_carry(op0 & 0x1 == 1);
@@ -406,7 +431,7 @@ impl Spc700 {
         res & 0xff
     }
 
-    fn ror(&mut self, op0: u16) -> u16 {
+    fn ror(&mut self, op0: u8) -> u8 {
         let c: u16 = if self.psw.carry() { 0x80 } else { 0 };
         let res = op0 >> 1 | c;
 
@@ -415,27 +440,39 @@ impl Spc700 {
         res & 0xff
     }
 
-    fn inc(&mut self, op0: u16) -> u16 {
-        op0.wrapping_add(1) & 0xff
+    fn inc(op0: u8) -> u8 {
+        op0.wrapping_add(1)
     }
 
-    fn dec(&mut self, op0: u16) -> u16 {
-        op0.wrapping_sub(1) & 0xff
+    fn dec(op0: u8) -> u8 {
+        op0.wrapping_sub(1)
     }
 
     fn addw(&mut self, op0: u16, op1: u16) -> u16 {
         self.psw.negate_carry();
-        let low = self.adc(op0 & 0xff, op1 & 0xff);
-        let high = self.adc((op0 >> 8) & 0xff, (op1 >> 8) & 0xff);
 
-        (high << 8) | low
+        let op0_lsb = op0 as u8;
+        let op0_msb = (op0 >> 8) as u8;
+        let op1_lsb = op1 as u8;
+        let op1_msb = (op1 >> 8) as u8;
+
+        let lsb = self.adc(op0_lsb, op1_lsb) as u16;
+        let msb = self.adc(op0_msb, op1_msb) as u16;
+
+        (msb << 8) | lsb
     }
 
     fn subw(&mut self, op0: u16, op1: u16) -> u16 {
         self.psw.assert_carry();
-        let low = self.sbc(op0 & 0xff, op1 & 0xff);
-        let high = self.sbc((op0 >> 8) & 0xff, (op1 >> 8) & 0xff);
 
-        (high << 8) | low
+        let op0_lsb = op0 as u8;
+        let op0_msb = (op0 >> 8) as u8;
+        let op1_lsb = op1 as u8;
+        let op1_msb = (op1 >> 8) as u8;
+
+        let lsb = self.sbc(op0_lsb, op1_lsb) as u16;
+        let msb = self.sbc(op0_msb, op1_msb) as u16;
+
+        (msb << 8) | lsb
     }
 }
