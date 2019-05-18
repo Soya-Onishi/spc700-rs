@@ -1,10 +1,12 @@
 pub mod instruction;
 pub mod flags;
+mod execution;
 
 use self::instruction::Addressing;
 use self::instruction::Opcode;
 use self::instruction::Instruction;
 use self::flags::Flags;
+
 
 #[derive(Copy, Clone)]
 enum Subject {
@@ -146,7 +148,7 @@ impl Spc700 {
 
                 Subject::Addr(self.add_prefix_addr(abs))
             }
-            Addressing::Abs12B => {
+            Addressing::Abs13B => {
                 let bit_addr13 = self.gen_word_addr();
                 let addr = bit_addr13 & 0x1fff;
                 let bit = (bit_addr13 >> 13) & 0x0007;
@@ -184,7 +186,10 @@ impl Spc700 {
         match subject {
             Subject::SP => { self.sp }
             Subject::Addr(addr) => { self.read_ram_word(addr) }
-            Subject::Bit(addr, _) => { self.read_ram_word(addr) }
+            Subject::Bit(addr, bit) => {
+                let byte = self.read_ram_word(addr);
+                // TODO: get bit
+            }
             Subject::A => { self.a }
             Subject::X => { self.x }
             Subject::Y => { self.y }
