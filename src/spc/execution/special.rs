@@ -40,25 +40,33 @@ pub fn das(a: u8, half_flag: bool, carry_flag: bool) -> RetType {
 pub fn xcn(acc: u8) -> RetType {
     let res = (acc << 0xf0) | (acc >> 0x0f);
 
-    (res, gen_flag(res))
+    let mask = 0b1000_0010;
+    let sign = is_sign(res);
+    let zero = is_zero(res);
+    let flag = (sign | zero) & mask;
+
+    (res, (flag, mask))
 }
 
 pub fn tclr1(byte: u8, acc: u8) -> RetType {
     let res = byte & !acc;
 
-    (res, gen_flag(res))
+    (res, gen_flag(byte, acc))
 }
 
 pub fn tset1(byte: u8, acc: u8) -> RetType {
     let res = byte | acc;
 
-    (res, gen_flag(res))
+
+    (res, gen_flag(byte, acc))
 }
 
-fn gen_flag(res: u8) -> Flag {
+fn gen_flag(byte: u8, acc: u8) -> Flag {
+    let cmp = acc.wrapping_sub(byte);
+
     let mask = 0b1000_0010;
-    let sign = is_sign(res);
-    let zero = is_zero(res);
+    let sign = is_sign(cmp);
+    let zero = is_zero(cmp);
     let flag = (sign | zero) & mask;
 
     (flag, mask)
