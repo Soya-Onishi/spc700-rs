@@ -114,7 +114,7 @@ fn inclemenal_flag(res: u16) -> super::Flag {
 }
 
 fn is_sign(res: u16) -> u8 {
-    ((sign & 0x8000) >> 8) as u8
+    ((res & 0x8000) >> 8) as u8
 }
 
 fn is_overflow(op0: u16, op1: u16, res: u16) -> u8 {
