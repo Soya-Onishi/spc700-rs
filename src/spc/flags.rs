@@ -11,6 +11,19 @@ pub struct Flags {
 }
 
 impl Flags {
+    pub fn new() -> Flags {
+        Flags {
+            n: false,
+            v: false,
+            p: false,
+            b: false,
+            h: false,
+            i: false,
+            z: true,
+            c: false,
+        }
+    }
+
     pub fn assert_sign(&mut self) { self.n = true; }
     pub fn negate_sign(&mut self) { self.n = false; }
     pub fn set_sign(&mut self, flag: bool) { self.n = flag; }

@@ -1,11 +1,14 @@
 pub mod instruction;
 pub mod flags;
 mod execution;
+mod ram;
+mod core;
 
 use self::instruction::Addressing;
 use self::instruction::Opcode;
 use self::instruction::Instruction;
 use self::flags::Flags;
+use self::execution::*;
 
 
 #[derive(Copy, Clone)]
@@ -41,12 +44,12 @@ impl Spc700 {
             Opcode::MOVW => { self.movw(&inst); }
             Opcode::PUSH => { self.push(&inst); }
             Opcode::POP => { self.pop(&inst); }
-            Opcode::OR => { self.alu_command(&inst, |op0, op1| { op0 | op1 }) }
-            Opcode::AND => { self.alu_command(&inst, |op0, op1| { op0 & op1 }) }
-            Opcode::EOR => { self.alu_command(&inst, |op0, op1| { op0 ^ op1 }) }
-            Opcode::CMP => { self.alu_command(&inst, self.cmp) }
-            Opcode::ADC => { self.alu_command(&inst, self.adc) }
-            Opcode::SBC => { self.alu_command(&inst, self.sbc) }
+            Opcode::OR => { self.alu_command(&inst, or) }
+            Opcode::AND => { self.alu_command(&inst, and) }
+            Opcode::EOR => { self.alu_command(&inst, eor) }
+            Opcode::CMP => { self.alu_command(&inst, cmp) }
+            Opcode::ADC => { self.alu_adc(&inst, adc) }
+            Opcode::SBC => { self.alu_adc(&inst, sbc) }
         }
     }
 
@@ -331,21 +334,35 @@ impl Spc700 {
         self.write_byte(dst, src);
     }
 
-    fn alu_command(&mut self, inst: &Instruction, operation: &Fn(u8, u8) -> u8) {
+    fn alu_command(&mut self, inst: &Instruction, operation: impl Fn(u8, u8) -> (u8, (u8, u8))) -> (u8, u8) {
         let op1_sub = self.gen_subject(inst.op1);
         let op0_sub = self.gen_subject(inst.op0);
 
         let op0 = self.read_byte(op0_sub);
         let op1 = self.read_byte(op1_sub);
 
-        let res = operation(op0, op1);
+        let (res, (flag, mask)) = operation(op0, op1);
 
         if inst.opcode != Opcode::CMP {
             self.write_byte(op0_sub, res);
         }
 
-        self.psw.set_sign((res >> 7) & 0x1 == 1);
-        self.psw.set_zero(res == 0);
+        (flag, mask)
+    }
+
+    fn alu_adc(&mut self, inst: &Instruction, operation: impl Fn(u8, u8, bool) -> (u8, (u8, u8))) -> (u8, u8) {
+        let op1_sub = self.gen_subject(inst.op1);
+        let op0_sub = self.gen_subject(inst.op0);
+
+        let op0 = self.read_byte(op0_sub);
+        let op1 = self.read_byte(op1_sub);
+        let c = self.psw.carry();
+
+        let (res, (flag, mask)) = operation(op0, op1, c);
+
+        self.write_byte(op0_sub, res);
+
+        (flag, mask)
     }
 
     fn eight_bit_command(&mut self, inst: &Instruction, operation: impl Fn(u8) -> u8) {
