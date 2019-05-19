@@ -6,7 +6,15 @@ mod one_alu;
 mod special;
 mod condjump;
 mod jump;
-// mod control;
+
+pub use self::eight_alu::*;
+pub use self::eight_shift::*;
+pub use self::inclement::*;
+pub use self::sixteen_alu::*;
+pub use self::one_alu::*;
+pub use self::special::*;
+pub use self::condjump::*;
+pub use self::jump::*;
 
 type Flag = (u8, u8); // (Flag from execution, mask of Flag)
 

@@ -65,8 +65,8 @@ pub fn div(ya: u16, x: u16) -> RetType {
         if x == 0 {
             (ya, 0, ya & 0xff)
         } else {
-            let a = (ya / x);
-            let y = (ya % x);
+            let a = ya / x;
+            let y = ya % x;
             let ya = y << 8 | a;
 
             (a, y, ya)

@@ -25,7 +25,7 @@ pub fn and1(bit: u8, c: u8) -> (u8, u8, u8) {
     (bit & c, MASK, FLAG)
 }
 
-pub fn eor(bit: u8, c: u8) -> (u8, u8, u8) {
+pub fn eor1(bit: u8, c: u8) -> (u8, u8, u8) {
     (bit ^ c, MASK, FLAG)
 }
 
