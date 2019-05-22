@@ -1,13 +1,12 @@
 pub fn bra(pc: u16, offset: u8) -> u16 {
-    let pc = pc as i16;
     let offset =
         if offset & 0x80 > 0 {
-            (offset as i16) | 0xff00
+            (offset as u16) | 0xff00
         } else {
-            offset as i16
+            offset as u16
         };
 
-    (pc.wrapping_add(offset)) as u16
+    pc.wrapping_add(offset)
 }
 
 pub fn jmp(dest: u16) -> u16 {
