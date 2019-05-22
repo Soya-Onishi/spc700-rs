@@ -1,5 +1,5 @@
 pub mod instruction;
-pub mod flags;
+mod register;
 mod execution;
 mod ram;
 mod core;
@@ -7,32 +7,9 @@ mod core;
 use self::instruction::Addressing;
 use self::instruction::Opcode;
 use self::instruction::Instruction;
-use self::flags::Flags;
 use self::execution::*;
 
-
-#[derive(Copy, Clone)]
-enum Subject {
-    Addr(u16),
-    Bit(u16, u8),
-    A,
-    X,
-    Y,
-    YA,
-    SP,
-    PSW,
-    None,
-}
-
-struct Spc700 {
-    a: u8,
-    x: u8,
-    y: u8,
-    sp: u8,
-    psw: Flags,
-    pc: u16,
-}
-
+/*
 #[allow(unused_variables)]
 impl Spc700 {
     pub fn exec(&mut self) {
@@ -51,25 +28,6 @@ impl Spc700 {
             Opcode::ADC => { self.alu_adc(&inst, adc) }
             Opcode::SBC => { self.alu_adc(&inst, sbc) }
         }
-    }
-
-    fn read_ram_byte(&self, addr: u8) -> u8 {
-        // TODO: This 0 is dummy
-        0
-    }
-
-    fn read_ram_word(&self, addr: u16) -> u8 {
-        // TODO: This 0 is dummy
-        0
-    }
-
-    fn write_ram_word(&mut self, addr: u16, byte: u8) {
-        // TODO: Write to ram
-    }
-
-    fn add_prefix_addr(&self, addr: u8) -> u16 {
-        // TODO: if P flag is set, addr: u16 = 0x0100 | addr;
-        0
     }
 
     fn gen_word_addr(&mut self) -> u16 {
@@ -498,3 +456,4 @@ impl Spc700 {
         (msb << 8) | lsb
     }
 }
+*/
