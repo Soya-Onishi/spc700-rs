@@ -1,4 +1,4 @@
-type RetType = (u8, super::Flag);
+pub type RetType = (u8, super::Flag);
 
 pub fn inc(op: u8) -> RetType {
     let res = op.wrapping_add(1);

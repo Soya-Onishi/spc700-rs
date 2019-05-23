@@ -1,5 +1,5 @@
 
-type RetType = (u16, bool); // (destination, is_branched)
+pub type RetType = (u16, bool); // (destination, is_branched)
 
 pub fn bpl(pwd: u8, pc: u16, offset: u8) -> RetType {
     branch(!pwd, 0x80, pc, offset)

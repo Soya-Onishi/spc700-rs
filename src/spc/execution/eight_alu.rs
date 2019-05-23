@@ -1,6 +1,6 @@
 use super::*;
 
-type RetType = (u8, super::Flag);
+pub type RetType = (u8, super::Flag);
 
 pub fn or(op0: u8, op1: u8) -> RetType {
     bitwise(op0, op1, |x, y| -> u8 { x | y })

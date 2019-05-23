@@ -1,4 +1,4 @@
-type RetType = (u16, super::Flag);
+pub type RetType = (u16, super::Flag);
 
 pub fn addw(op0: u16, op1: u16) -> RetType {
     let res = op0.wrapping_add(op1);
@@ -18,7 +18,7 @@ pub fn subw(op0: u16, op1: u16) -> RetType {
     addw(op0, (!op1).wrapping_add(1))
 }
 
-fn cmpw(op0: u16, op1: u16) -> RetType {
+pub fn cmpw(op0: u16, op1: u16) -> RetType {
     let res = op0.wrapping_sub(op1);
 
     let mask = 0b1000_0011;
@@ -30,14 +30,14 @@ fn cmpw(op0: u16, op1: u16) -> RetType {
     (res, (flag, mask))
 }
 
-fn incw(op: u16) -> RetType {
+pub fn incw(op: u16, _dummy: u16) -> RetType {
     let res = op.wrapping_add(1);
     let flag = inclemenal_flag(res);
 
     (res, flag)
 }
 
-fn decw(op: u16) -> RetType {
+pub fn decw(op: u16, _dummy: u16) -> RetType {
     let res = op.wrapping_sub(1);
     let flag = inclemenal_flag(res);
 
@@ -83,7 +83,7 @@ pub fn div(ya: u16, x: u16) -> RetType {
     (ya, (flag, mask))
 }
 
-pub fn mul(ya: u16) -> RetType {
+pub fn mul(ya: u16, _dummy: u16) -> RetType {
     fn is_zero(ya: u16) -> u8 {
         let flag = (ya & 0xff00) == 0;
         (flag as u8) << 1

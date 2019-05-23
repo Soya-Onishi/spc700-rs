@@ -1,22 +1,13 @@
-mod eight_alu;
-mod eight_shift;
-mod inclement;
-mod sixteen_alu;
-mod one_alu;
-mod special;
-mod condjump;
-mod jump;
+pub mod eight_alu;
+pub mod eight_shift;
+pub mod inclement;
+pub mod sixteen_alu;
+pub mod one_alu;
+pub mod special;
+pub mod condjump;
+pub mod jump;
 
-pub use self::eight_alu::*;
-pub use self::eight_shift::*;
-pub use self::inclement::*;
-pub use self::sixteen_alu::*;
-pub use self::one_alu::*;
-pub use self::special::*;
-pub use self::condjump::*;
-pub use self::jump::*;
-
-type Flag = (u8, u8); // (Flag from execution, mask of Flag)
+pub type Flag = (u8, u8); // (Flag from execution, mask of Flag)
 
 fn is_carry(op0: u8, res: u8) -> u8 {
     (op0 > res) as u8
