@@ -30,7 +30,7 @@ NONE,      // The opcode is not separted by addressing
 #[derive(Copy, Clone)]
 pub enum PSWBit {
     N,
-    VH,
+    V,
     P,
     B,
     I,
@@ -75,16 +75,16 @@ pub const ADDRESSING_OP0_TABLE: [Addressing; 256] = [
     PSW(P), Special, AbsB, AbsB, A, A, A, A, A, Abs, PSW(C), Abs, Abs16, A, Abs, None, // 0x2X
     PSW(N), Special, AbsB, AbsB, A, A, A, A, Abs, IndX, Abs, AbsX, A, X, X, Special, // 0x3X
     PSW(P), Special, AbsB, AbsB, A, A, A, A, A, Abs, PSW(C), Abs, Abs16, X, Abs16, Special, // 0x4X
-    PSW(VH), Special, AbsB, AbsB, A, A, A, A, Abs, IndX, YA, AbsX, A, X, Y, None, // 0x5X
+    PSW(V), Special, AbsB, AbsB, A, A, A, A, Abs, IndX, YA, AbsX, A, X, Y, None, // 0x5X
     PSW(C), Special, AbsB, AbsB, A, A, A, A, A, Abs, PSW(C), Abs, Abs16, Y, Abs, Special, // 0x6X
-    PSW(VH), Special, AbsB, AbsB, A, A, A, A, Abs, IndX, YA, AbsX, A, A, Y, Special, // 0x7X
+    PSW(V), Special, AbsB, AbsB, A, A, A, A, Abs, IndX, YA, AbsX, A, A, Y, Special, // 0x7X
     PSW(C), Special, AbsB, AbsB, A, A, A, A, A, Abs, PSW(C), Abs, Abs16, Y, PSW(ALL), Abs, // 0x8X
     PSW(C), Special, AbsB, AbsB, A, A, A, A, Abs, IndX, YA, AbsX, A, X, YA, A, // 0x9X
     PSW(I), Special, AbsB, AbsB, A, A, A, A, A, Abs, PSW(C), Abs, Abs16, Y, A, Special, // 0xAX
     PSW(C), Special, AbsB, AbsB, A, A, A, A, Abs, IndX, YA, AbsX, A, SP, A, Special, // 0xBX
     PSW(I), Special, AbsB, AbsB, Abs, Abs16, IndX, IndAbsX, X, Abs16, Abs13B, Abs, Abs16, X, X, YA, // 0xCX
     PSW(Z), Special, AbsB, AbsB, AbsX, Abs16X, Abs16Y, IndAbsY, Abs, AbsY, Abs, AbsX, Y, A, AbsX, A, // 0xDX
-    PSW(VH), Special, AbsB, AbsB, A, A, A, A, A, X, Abs13B, Y, Y, PSW(C), Y, None, // 0xEX
+    PSW(ALL), Special, AbsB, AbsB, A, A, A, A, A, X, Abs13B, Y, Y, PSW(C), Y, None, // 0xEX
     PSW(Z), Special, AbsB, AbsB, A, A, A, A, X, X, Abs, Y, Y, Y, Y, None, // 0xFX
 ];
 
