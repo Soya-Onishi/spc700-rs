@@ -1,7 +1,9 @@
 use super::ram::*;
 use super::instruction::Instruction;
 use super::instruction::Addressing;
+use super::instruction::Opcode;
 use super::register::*;
+use super::execution::*;
 
 #[derive(Copy, Clone)]
 enum Subject {
@@ -214,4 +216,109 @@ impl Spc700 {
         }
     }
 
+    fn write(&mut self, dst: &Subject, data: u16) {
+
+    }
+
+    fn alu_bit_op(&mut self, inst: &Instruction, op: impl Fn(u8, u8) -> eight_alu::RetType) -> Flag {
+        let op1_sub = self.gen_subject(inst.op1, false);
+        let op0_sub = self.gen_subject(inst.op0, false);
+        let op0 = self.read(op0_sub);
+        let op1 = self.read(op1_sub);
+
+        let (res, pwd) = op(op0 as u8, op1 as u8);
+        self.write(&op0_sub, res as u16);
+
+        pwd
+    }
+
+    fn alu_cmp(&mut self, inst: &Instruction) -> Flag {
+        let op1_sub = self.gen_subject(inst.op1, false);
+        let op0_sub = self.gen_subject(inst.op0, false);
+        let op0 = self.read(op0_sub);
+        let op1 = self.read(op1_sub);
+
+        let (_, pwd) = eight_alu::cmp(op0 as u8, op1 as u8);
+
+        pwd
+    }
+
+    fn alu_op(&mut self, inst: &Instruction, op: impl Fn(u8, u8, bool) -> eight_alu::RetType) -> Flag {
+        let op1_sub = self.gen_subject(inst.op1, false);
+        let op0_sub = self.gen_subject(inst.op0, false);
+        let op0 = self.read(op0_sub);
+        let op1 = self.read(op1_sub);
+
+        let (res, psw) = op(op0 as u8, op1 as u8, self.reg.psw.carry());
+        self.write(&op0_sub, res as u16);
+
+        psw
+    }
+
+    fn alu_shift(&mut self, inst: &Instruction, op: impl Fn(u8, bool) -> eight_shift::RetType) -> Flag {
+        let op0_sub = self.gen_subject(inst.op0, false);
+        let op0 = self.read(op0_sub);
+
+        let (res, psw) = op(op0 as u8, self.reg.psw.carry());
+        self.write(&op0_sub, res as u16);
+
+        psw
+    }
+
+    fn alu_inclement(&mut self, inst: &Instruction, op: impl Fn(u8) -> inclement::RetType) -> Flag {
+        let op0_sub = self.gen_subject(inst.op0, false);
+        let op0 = self.read(op0_sub);
+
+        let (res, psw) = op(op0 as u8);
+        self.write(&op0_sub, res as u16);
+
+        psw
+    }
+
+    fn alu_word_op(&mut self, inst: &Instruction, op: impl Fn(u16, u16) -> sixteen_alu::RetType) -> Flag {
+        let op1_sub = self.gen_subject(inst.op1, true);
+        let op0_sub = self.gen_subject(inst.op0, true);
+        let op0 = self.read(op0_sub);
+        let op1 = self.read(op1_sub);
+
+        let (res, psw) = op(op0, op1);
+        self.write(&op0_sub, res);
+
+        psw
+    }
+
+    fn one_bit_op(&mut self, inst: &Instruction, op: impl Fn(u8, u8) -> one_alu::RetType) -> Flag {
+        let op1_sub = self.gen_subject(inst.op1, false);
+        let op0_sub = self.gen_subject(inst.op0, false);
+        let op0 = self.read(op0_sub);
+        let op1 = self.read(op1_sub);
+
+        let (res, psw) = op(op0 as u8, op1 as u8);
+        self.write(&op0_sub, res as u16);
+
+        psw
+    }
+
+    fn branch(&mut self, inst: &Instruction) -> Flag {
+        let op0_sub = self.gen_subject(inst.op0, false); // either psw, [aa], [aa+X] or y
+        let op0 = self.read(op0_sub);
+
+        let rr = self.read(self.gen_subject(inst.op1, false));
+
+        match inst.opcode {
+            Opcode::CBNE => {
+                condjump::cbne(op0 as u8, self.reg.a, self.reg.pc, rr as u8);
+            }
+            Opcode::DBNZ => {
+                let byte = op0.wrapping_sub(1);
+                self.y(byte as u8, self.reg.pc, rr as u8);
+                self.write(&op0_sub, byte);
+            }
+            _ => {
+                condjump::branch(op0 as u8, self.reg.pc, rr as u8, inst.raw_op & 0x20 > 0)
+            }
+        }
+
+        (0x00, 0x00)
+    }
 }
