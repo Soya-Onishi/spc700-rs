@@ -393,7 +393,14 @@ impl Spc700 {
         (0x00, 0x00)
     }
 
+    fn pcall(&mut self, inst: &Instruction) -> Flag {
+        let nn_sub = self.gen_subject(inst.op0, false);
+        let nn = self.read(nn_sub);
+        let dst = 0xff00 | nn;
 
+        self.push_word(self.reg.pc);
+        self.reg.pc = dst;
 
-
+        (0x00, 0x00)
+    }
 }
