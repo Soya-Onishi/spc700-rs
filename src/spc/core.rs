@@ -327,4 +327,73 @@ impl Spc700 {
 
         ((0x00, 0x00), is_branch)
     }
+
+    fn relative_jump(&mut self, inst: &Instruction) -> Flag {
+        let rr_sub = self.gen_subject(inst.op0, false);
+        let rr = self.read(rr_sub);
+
+        self.reg.pc = self.reg.pc.wrapping_add(rr);
+
+        (0x00, 0x00)
+    }
+
+    fn absolute_jump(&mut self, inst: &Instruction) -> Flag {
+        let addr_sub = self.gen_subject(inst.op0, true);
+
+        let dst = match inst.raw_op {
+            0x5f => {
+                match addr_sub {
+                    Subject::Addr(addr, _ ) => { addr }
+                    _ => { panic!("This code is unreachable.") }
+                }
+            }
+            0x1f => {
+                self.read(addr_sub)
+            }
+            _ => {
+                panic!("This code is unreacheable")
+            }
+        };
+
+        self.reg.pc = dst;
+
+        (0x00, 0x00)
+    }
+
+    fn push_word(&mut self, word: u16) {
+        for i in 0..1 {
+            let addr = 0x0100 | (self.reg.sp.wrapping_sub(i) as u16);
+            let byte = ((word >> (i * 8)) & 0xff) as u8;
+            self.ram.write(addr, pc_byte);
+        }
+
+        self.reg.sp = self.reg.sp.wrapping_sub(2);
+    }
+
+    fn call(&mut self, inst: &Instruction) -> Flag {
+        let dst = match self.gen_subject(inst.op0, false) {
+            Subject::Addr(addr, _) => { addr }
+            _ => { panic!("This code is unreachable") }
+        };
+
+        self.push_word(self.reg.pc);
+        self.reg.pc = dst;
+
+        (0x00, 0x00)
+    }
+
+    fn tcall(&mut self, inst: &Instruction) -> Flag {
+        let n = (((inst.raw_op >> 4) & 0x0f) << 1) as u16;
+        self.push_word(self.reg.pc);
+
+        let lsb =self.ram.read(0xffde - n) as u16;
+        let msb = self.ram.read(0xffde - n + 1) as u16;
+        self.reg.pc = msb << 8 | lsb;
+
+        (0x00, 0x00)
+    }
+
+
+
+
 }
