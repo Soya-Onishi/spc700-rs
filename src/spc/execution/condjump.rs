@@ -43,27 +43,25 @@ pub fn bbc(byte: u8, pc: u16, offset: u8) -> RetType {
 }
 */
 
-pub fn cbne(byte: u8, acc: u8, pc: u16, offset: u8) -> RetType {
+pub fn cbne(byte: u8, acc: u8, offset: u8) -> RetType {
     let is_branch = byte != acc;
     let bias = get_bias(offset, is_branch);
 
-    ((pc.wrapping_add(bias)), is_branch)
+    (bias, is_branch)
 }
 
-pub fn dbnz(byte: u8, pc: u16, offset: u8) -> (u8, RetType) {
-    let byte = byte.wrapping_sub(1);
-
+pub fn dbnz(byte: u8, offset: u8) -> RetType {
     let is_branch = byte != 0;
     let bias = get_bias(offset, is_branch);
 
-    (byte, (pc.wrapping_add(bias), is_branch))
+    (bias, is_branch)
 }
 
-pub fn branch(bit: u8, pc: u16, offset: u8, is_true: bool) -> RetType {
+pub fn branch(bit: u8, offset: u8, is_true: bool) -> RetType {
     let is_branch = (bit & 1 > 0) == is_true;
     let bias = get_bias(offset, is_branch);
 
-    (pc.wrapping_add(bias), is_branch)
+    (bias, is_branch)
 }
 
 fn get_bias(offset: u8, is_branch: bool) -> u16 {
