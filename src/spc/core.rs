@@ -364,10 +364,37 @@ impl Spc700 {
         for i in 0..1 {
             let addr = 0x0100 | (self.reg.sp.wrapping_sub(i) as u16);
             let byte = ((word >> (i * 8)) & 0xff) as u8;
-            self.ram.write(addr, pc_byte);
+            self.ram.write(addr, byte);
         }
 
         self.reg.sp = self.reg.sp.wrapping_sub(2);
+    }
+
+    fn push_byte(&mut self, byte: u8) {
+        let addr = 0x0100 | (self.reg.sp as u16);
+        self.ram.write(addr, byte);
+
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+    }
+
+    fn pull_byte(&mut self) -> u8 {
+        let addr = 0x0100 | (self.reg.sp.wrapping_add(1) as u16);
+        let byte = self.ram.read(addr);
+
+        self.reg.sp = self.reg.sp.wrapping_add(1);
+
+        byte
+    }
+
+    fn pull_word(&mut self) -> u16 {
+        let addr_for_msb = 0x0100 | (self.reg.sp.wrapping_add(1) as u16);
+        let addr_for_lsb = 0x0100 | (self.reg.sp.wrapping_add(2) as u16);
+        let word_msb = self.ram.read(addr_for_msb) as u16;
+        let word_lsb = self.ram.read(addr_for_lsb) as u16;
+
+        self.reg.sp =self.reg.sp.wrapping_add(2);
+
+        (word_msb << 8) | word_lsb
     }
 
     fn call(&mut self, inst: &Instruction) -> Flag {
@@ -403,4 +430,34 @@ impl Spc700 {
 
         (0x00, 0x00)
     }
+
+    fn ret(&mut self, inst: &Instruction) -> Flag {
+        let dst = self.pull_word();
+        self.reg.pc = dst;
+
+        (0x00, 0x00)
+    }
+
+    fn ret1(&mut self, inst: &Instruction) -> Flag {
+        let psw = self.pull_byte();
+        let pc = self.pull_word();
+
+        self.reg.pc = pc;
+        self.reg.psw.set(psw);
+
+        (0x00, 0x00)
+    }
+
+    fn brk(&mut self, inst: &Instruction) -> Flag {
+        self.push_word(self.reg.pc);
+        self.push_byte(self.reg.psw.get());
+
+        let pc_lsb = self.ram.read(0xffde) as u16;
+        let pc_msb = self.ram.read(0xffdf) as u16;
+        self.reg.pc = (pc_msb << 8) | pc_lsb;
+
+        (0b0001_0000, 0b0001_0100)
+    }
+
+
 }
