@@ -299,26 +299,32 @@ impl Spc700 {
         psw
     }
 
-    fn branch(&mut self, inst: &Instruction) -> Flag {
+    fn branch(&mut self, inst: &Instruction) -> (Flag, bool) {
         let op0_sub = self.gen_subject(inst.op0, false); // either psw, [aa], [aa+X] or y
         let op0 = self.read(op0_sub);
 
-        let rr = self.read(self.gen_subject(inst.op1, false));
+        let rr_sub =self.gen_subject(inst.op1, false);
+        let rr = self.read(rr_sub);
 
-        match inst.opcode {
+        let (bias, is_branch) = match inst.opcode {
             Opcode::CBNE => {
-                condjump::cbne(op0 as u8, self.reg.a, self.reg.pc, rr as u8);
+                condjump::cbne(op0 as u8, self.reg.a, rr as u8)
             }
             Opcode::DBNZ => {
                 let byte = op0.wrapping_sub(1);
-                self.y(byte as u8, self.reg.pc, rr as u8);
+                let (bias, is_branch) = condjump::dbnz(byte as u8, rr as u8);
+
                 self.write(&op0_sub, byte);
+
+                (bias, is_branch)
             }
             _ => {
-                condjump::branch(op0 as u8, self.reg.pc, rr as u8, inst.raw_op & 0x20 > 0)
+                condjump::branch(op0 as u8, rr as u8, inst.raw_op & 0x20 > 0)
             }
-        }
+        };
 
-        (0x00, 0x00)
+        self.reg.pc = self.reg.pc.wrapping_add(bias);
+
+        ((0x00, 0x00), is_branch)
     }
 }
