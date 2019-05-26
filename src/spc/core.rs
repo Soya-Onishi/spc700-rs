@@ -4,18 +4,133 @@ use super::instruction::Addressing;
 use super::instruction::Opcode;
 use super::register::*;
 use super::execution::*;
+use super::subject::Subject;
 
-#[derive(Copy, Clone)]
-enum Subject {
-    Addr(u16, bool),
-    Bit(u16, u8),
-    A,
-    X,
-    Y,
-    YA,
-    SP,
-    PSW,
-    None,
+trait BinOp<T> {
+    fn binop(&mut self, inst: &Instruction, op: impl Fn(T, T) -> (T, Flag)) -> Flag;
+}
+
+impl BinOp<u8> for Spc700 {
+    fn binop(&mut self, inst: &Instruction, op: impl Fn(u8, u8) -> (u8, Flag)) -> Flag {
+        let (op1_sub, incl) = Subject::new(self, inst.op1, false);
+        self.inc_pc(incl);
+        let (op0_sub, incl) = Subject::new(self, inst.op0, false);
+        self.inc_pc(incl);
+
+        let op0 = self.read(op0_sub);
+        let op1 = self.read(op1_sub);
+
+        let (res, pwd) = op(op0 as u8, op1 as u8);
+
+        if inst.opcode != Opcode::CMP {
+            self.write(&op0_sub, res as u16);
+        }
+
+        pwd
+    }
+}
+
+impl BinOp<u16> for Spc700 {
+    fn binop(&mut self, inst: &Instruction, op: impl Fn(u16, u16) -> (u16, Flag)) -> Flag {
+        let (op1_sub, incl) = Subject::new(self, inst.op1, true);
+        self.inc_pc(incl);
+        let (op0_sub, incl) = Subject::new(self, inst.op0, true);
+        self.inc_pc(incl);
+
+        let op0 = self.read(op0_sub);
+        let op1 = self.read(op1_sub);
+
+        let (res, psw) = op(op0, op1);
+        self.write(&op0_sub, res);
+
+        psw
+    }
+}
+
+trait UnaryOp<T> {
+    fn unaryop(&mut self, inst: &Instruction, op: impl Fn(T) -> (u8, Flag)) -> Flag;
+}
+
+impl UnaryOp<u8> for Spc700 {
+    fn unaryop(&mut self, inst: &Instruction, op: impl Fn(u8) -> (u8, Flag)) -> Flag {
+        let (op0_sub, incl) = Subject::new(self, inst.op0, false);
+        self.inc_pc(incl);
+
+        let op0 = self.read(op0_sub);
+
+        let (res, psw) = op(op0 as u8);
+        self.write(&op0_sub, res as u16);
+
+        psw
+    }
+}
+
+
+impl UnaryOp<(u8, bool)> for Spc700 {
+    fn unaryop(&mut self, inst: &Instruction, op: impl Fn((u8, bool)) -> (u8, Flag)) -> Flag {
+        let (op0_sub, incl) = Subject::new(self, inst.op0, false);
+        self.inc_pc(incl);
+
+        let op0 = self.read(op0_sub);
+
+        let (res, psw) = op((op0 as u8, self.reg.psw.carry()));
+        self.write(&op0_sub, res as u16);
+
+        psw
+    }
+}
+
+trait PullOperation<T> {
+    fn pull(&mut self) -> T;
+}
+
+impl PullOperation<u8> for Spc700 {
+    fn pull(&mut self) -> u8 {
+        let addr = 0x0100 | (self.reg.sp.wrapping_add(1) as u16);
+        let byte = self.ram.read(addr);
+
+        self.reg.sp = self.reg.sp.wrapping_add(1);
+
+        byte
+    }
+}
+
+impl PullOperation<u16> for Spc700 {
+    fn pull(&mut self) -> u16 {
+        let addr_for_msb = 0x0100 | (self.reg.sp.wrapping_add(1) as u16);
+        let addr_for_lsb = 0x0100 | (self.reg.sp.wrapping_add(2) as u16);
+        let word_msb = self.ram.read(addr_for_msb) as u16;
+        let word_lsb = self.ram.read(addr_for_lsb) as u16;
+
+        self.reg.sp =self.reg.sp.wrapping_add(2);
+
+        (word_msb << 8) | word_lsb
+    }
+}
+
+trait PushOperation<T> {
+    fn push(&mut self, data: T);
+}
+
+impl PushOperation<u8> for Spc700 {
+    fn push(&mut self, data: u8) {
+        let addr = 0x0100 | (self.reg.sp as u16);
+        self.ram.write(addr, data);
+
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+    }
+}
+
+impl PushOperation<u16> for Spc700 {
+    fn push(&mut self, data: u16) {
+        for i in 0..1 {
+            let addr = 0x0100 | (self.reg.sp.wrapping_sub(i) as u16);
+            let byte = ((data >> (i * 8)) & 0xff) as u8;
+            self.ram.write(addr, byte);
+        }
+
+        self.reg.sp = self.reg.sp.wrapping_sub(2);
+    }
 }
 
 pub struct Spc700 {
@@ -32,16 +147,16 @@ impl Spc700 {
     }
 
     pub fn execute(&mut self) {
-        let pc = self.incl_pc();
+        let pc = self.inc_pc(1);
         let opcode = self.ram.read(pc);
         let inst = Instruction::decode(opcode);
 
 
     }
 
-    fn incl_pc(&mut self) -> u16{
+    fn inc_pc(&mut self, count: u16) -> u16{
         let pc = self.reg.pc;
-        self.reg.pc = pc.wrapping_add(1);
+        self.reg.pc = pc.wrapping_add(count);
 
         pc
     }
@@ -61,6 +176,7 @@ impl Spc700 {
 //        self.set_addr_msb(byte)
 //    }
 
+    /*
     fn get_word_addr(&mut self) -> u16 {
         let msb_pc = self.incl_pc();
         let lsb_pc = self.incl_pc();
@@ -69,7 +185,9 @@ impl Spc700 {
 
         msb << 8 | lsb
     }
+    */
 
+    /*
     fn gen_subject(&mut self, addressing: Addressing, word_access: bool) -> Subject {
         match addressing {
             Addressing::None => {
@@ -170,6 +288,7 @@ impl Spc700 {
             Addressing::Special => { Subject::None }
         }
     }
+    */
 
     fn read(&self, subject: Subject) -> u16 {
         match subject {
@@ -220,32 +339,31 @@ impl Spc700 {
 
     }
 
+    /*
     fn alu_bit_op(&mut self, inst: &Instruction, op: impl Fn(u8, u8) -> eight_alu::RetType) -> Flag {
-        let op1_sub = self.gen_subject(inst.op1, false);
-        let op0_sub = self.gen_subject(inst.op0, false);
+        let (op1_sub, incl) = Subject::new(self, inst.op1, false);
+        self.incl_pc(incl);
+        let (op0_sub, incl) = Subject::new(self, inst.op0, false);
+        self.incl_pc(incl);
+
         let op0 = self.read(op0_sub);
         let op1 = self.read(op1_sub);
 
         let (res, pwd) = op(op0 as u8, op1 as u8);
-        self.write(&op0_sub, res as u16);
 
-        pwd
-    }
-
-    fn alu_cmp(&mut self, inst: &Instruction) -> Flag {
-        let op1_sub = self.gen_subject(inst.op1, false);
-        let op0_sub = self.gen_subject(inst.op0, false);
-        let op0 = self.read(op0_sub);
-        let op1 = self.read(op1_sub);
-
-        let (_, pwd) = eight_alu::cmp(op0 as u8, op1 as u8);
+        if inst.opcode != Opcode::CMP {
+            self.write(&op0_sub, res as u16);
+        }
 
         pwd
     }
 
     fn alu_op(&mut self, inst: &Instruction, op: impl Fn(u8, u8, bool) -> eight_alu::RetType) -> Flag {
-        let op1_sub = self.gen_subject(inst.op1, false);
-        let op0_sub = self.gen_subject(inst.op0, false);
+        let (op1_sub, incl) = Subject::new(self, inst.op1, false);
+        self.incl_pc(incl);
+        let (op0_sub, incl) = Subject::new(self, inst.op0, false);
+        self.incl_pc(incl);
+
         let op0 = self.read(op0_sub);
         let op1 = self.read(op1_sub);
 
@@ -256,7 +374,9 @@ impl Spc700 {
     }
 
     fn alu_shift(&mut self, inst: &Instruction, op: impl Fn(u8, bool) -> eight_shift::RetType) -> Flag {
-        let op0_sub = self.gen_subject(inst.op0, false);
+        let (op0_sub, incl) = Subject::new(self, inst.op0, false);
+        self.incl_pc(incl);
+
         let op0 = self.read(op0_sub);
 
         let (res, psw) = op(op0 as u8, self.reg.psw.carry());
@@ -266,7 +386,9 @@ impl Spc700 {
     }
 
     fn alu_inclement(&mut self, inst: &Instruction, op: impl Fn(u8) -> inclement::RetType) -> Flag {
-        let op0_sub = self.gen_subject(inst.op0, false);
+        let (op0_sub, incl) = Subject::new(self, inst.op0, false);
+        self.incl_pc(incl);
+
         let op0 = self.read(op0_sub);
 
         let (res, psw) = op(op0 as u8);
@@ -298,12 +420,15 @@ impl Spc700 {
 
         psw
     }
+    */
 
     fn branch(&mut self, inst: &Instruction) -> (Flag, bool) {
-        let op0_sub = self.gen_subject(inst.op0, false); // either psw, [aa], [aa+X] or y
+        let (op0_sub, incl) = Subject::new(self, inst.op0, false); // either psw, [aa], [aa+X] or y
+        self.inc_pc(incl);
         let op0 = self.read(op0_sub);
 
-        let rr_sub =self.gen_subject(inst.op1, false);
+        let (rr_sub, incl) =Subject::new(self, inst.op1, false);
+        self.inc_pc(incl);
         let rr = self.read(rr_sub);
 
         let (bias, is_branch) = match inst.opcode {
@@ -329,8 +454,10 @@ impl Spc700 {
     }
 
     fn relative_jump(&mut self, inst: &Instruction) -> Flag {
-        let rr_sub = self.gen_subject(inst.op0, false);
+        let (rr_sub, inc) = Subject::new(self,inst.op0, false);
         let rr = self.read(rr_sub);
+        self.inc_pc(inc);
+
 
         self.reg.pc = self.reg.pc.wrapping_add(rr);
 
@@ -338,7 +465,8 @@ impl Spc700 {
     }
 
     fn absolute_jump(&mut self, inst: &Instruction) -> Flag {
-        let addr_sub = self.gen_subject(inst.op0, true);
+        let (addr_sub, inc) = Subject::new(self, inst.op0, true);
+        self.inc_pc(inc);
 
         let dst = match inst.raw_op {
             0x5f => {
@@ -360,6 +488,7 @@ impl Spc700 {
         (0x00, 0x00)
     }
 
+    /*
     fn push_word(&mut self, word: u16) {
         for i in 0..1 {
             let addr = 0x0100 | (self.reg.sp.wrapping_sub(i) as u16);
@@ -376,7 +505,9 @@ impl Spc700 {
 
         self.reg.sp = self.reg.sp.wrapping_sub(1);
     }
+    */
 
+    /*
     fn pull_byte(&mut self) -> u8 {
         let addr = 0x0100 | (self.reg.sp.wrapping_add(1) as u16);
         let byte = self.ram.read(addr);
@@ -396,14 +527,18 @@ impl Spc700 {
 
         (word_msb << 8) | word_lsb
     }
+    */
 
     fn call(&mut self, inst: &Instruction) -> Flag {
-        let dst = match self.gen_subject(inst.op0, false) {
+        let (subject, inc) = Subject::new(self, inst.op0, false);
+        self.inc_pc(inc);
+
+        let dst = match subject {
             Subject::Addr(addr, _) => { addr }
             _ => { panic!("This code is unreachable") }
         };
 
-        self.push_word(self.reg.pc);
+        self.push(self.reg.pc);
         self.reg.pc = dst;
 
         (0x00, 0x00)
@@ -411,7 +546,7 @@ impl Spc700 {
 
     fn tcall(&mut self, inst: &Instruction) -> Flag {
         let n = (((inst.raw_op >> 4) & 0x0f) << 1) as u16;
-        self.push_word(self.reg.pc);
+        self.push(self.reg.pc);
 
         let lsb =self.ram.read(0xffde - n) as u16;
         let msb = self.ram.read(0xffde - n + 1) as u16;
@@ -421,26 +556,27 @@ impl Spc700 {
     }
 
     fn pcall(&mut self, inst: &Instruction) -> Flag {
-        let nn_sub = self.gen_subject(inst.op0, false);
+        let (nn_sub, inc) = Subject::new(self, inst.op0, false);
+        self.inc_pc(inc);
         let nn = self.read(nn_sub);
         let dst = 0xff00 | nn;
 
-        self.push_word(self.reg.pc);
+        self.push(self.reg.pc);
         self.reg.pc = dst;
 
         (0x00, 0x00)
     }
 
-    fn ret(&mut self, inst: &Instruction) -> Flag {
-        let dst = self.pull_word();
+    fn ret(&mut self) -> Flag {
+        let dst: u16 = self.pull();
         self.reg.pc = dst;
 
         (0x00, 0x00)
     }
 
-    fn ret1(&mut self, inst: &Instruction) -> Flag {
-        let psw = self.pull_byte();
-        let pc = self.pull_word();
+    fn ret1(&mut self) -> Flag {
+        let psw: u8 = self.pull();
+        let pc: u16 = self.pull();
 
         self.reg.pc = pc;
         self.reg.psw.set(psw);
@@ -448,9 +584,9 @@ impl Spc700 {
         (0x00, 0x00)
     }
 
-    fn brk(&mut self, inst: &Instruction) -> Flag {
-        self.push_word(self.reg.pc);
-        self.push_byte(self.reg.psw.get());
+    fn brk(&mut self) -> Flag {
+        self.push(self.reg.pc);
+        self.push(self.reg.psw.get());
 
         let pc_lsb = self.ram.read(0xffde) as u16;
         let pc_msb = self.ram.read(0xffdf) as u16;
@@ -459,5 +595,23 @@ impl Spc700 {
         (0b0001_0000, 0b0001_0100)
     }
 
+    fn clrp(&mut self) -> Flag {
+        self.reg.psw.negate_page();
+        (0x00, 0x00)
+    }
 
+    fn setp(&mut self) -> Flag {
+        self.reg.psw.assert_page();
+        (0x00, 0x00)
+    }
+
+    fn ei(&mut self) -> Flag {
+        self.reg.psw.assert_interrupt();
+        (0x00, 0x00)
+    }
+
+    fn di(&mut self) -> Flag {
+        self.reg.psw.negate_interrupt();
+        (0x00, 0x00)
+    }
 }
