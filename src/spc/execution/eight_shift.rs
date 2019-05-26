@@ -2,7 +2,7 @@ use super::Flag;
 
 pub type RetType = (u8, Flag);
 
-pub fn asl(op0: u8, carry_flag: bool) -> RetType {
+pub fn asl((op0, carry_flag): (u8, bool)) -> RetType {
     let shifter = |op, carry| -> u8 {
         op << 1
     };
@@ -13,7 +13,7 @@ pub fn asl(op0: u8, carry_flag: bool) -> RetType {
     shift(op0, carry_flag, shifter, is_carry)
 }
 
-pub fn rol(op0: u8, carry_flag: bool) -> RetType {
+pub fn rol((op0, carry_flag): (u8, bool)) -> RetType {
     let shifter = |op, carry| -> u8 {
         let c = if carry_flag { 1 } else { 0 };
         op0 << 1  | c
@@ -25,7 +25,7 @@ pub fn rol(op0: u8, carry_flag: bool) -> RetType {
     shift(op0, carry_flag, shifter, is_carry)
 }
 
-pub fn lsr(op0: u8, carry_flag: bool) -> RetType {
+pub fn lsr((op0, carry_flag): (u8, bool)) -> RetType {
     let shifter = |op, carry| {
         (op >> 1) & (0x7f as u8)
     };
@@ -36,7 +36,7 @@ pub fn lsr(op0: u8, carry_flag: bool) -> RetType {
     shift(op0, carry_flag, shifter, is_carry)
 }
 
-pub fn ror(op0: u8, carry_flag: bool) -> RetType {
+pub fn ror((op0, carry_flag): (u8, bool)) -> RetType {
     let shifter = |op, carry| -> u8 {
         let c = if carry_flag { 0x80 } else { 0 };
         op0 >> 1 | c
