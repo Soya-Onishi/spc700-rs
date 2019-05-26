@@ -22,4 +22,11 @@ impl Register {
             pc: 0,
         }
     }
+
+    pub fn inc_pc(&mut self, count: u16) -> u16 {
+        let pc = self.pc;
+        self.pc = self.pc.wrapping_add(count);
+
+        pc
+    }
 }
