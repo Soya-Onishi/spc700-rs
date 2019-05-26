@@ -1,5 +1,14 @@
 pub type RetType = (u16, super::Flag);
 
+pub fn movw(_dummy: u16, src: u16) -> RetType {
+    let mask = 0b1000_0010;
+    let sign = (src & 0x8000 > 0) as u8;
+    let zero = (src & 0xff00 == 0) as u8;
+    let flag = (sign << 7) | (zero << 1);
+
+    (src, (mask, flag))
+}
+
 pub fn addw(op0: u16, op1: u16) -> RetType {
     let res = op0.wrapping_add(op1);
 

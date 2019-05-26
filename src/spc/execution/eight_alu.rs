@@ -3,7 +3,7 @@ use super::*;
 pub type RetType = (u8, super::Flag);
 
 pub fn mov(_dummy: u8, src: u8) -> RetType {
-    bitwise(_dummy, src, |_x, y| -> u8 { y })
+    bitwise(_dummy, src, |_x, y| -> u8 { y } )
 }
 
 pub fn or(op0: u8, op1: u8) -> RetType {
