@@ -2,14 +2,13 @@ pub mod instruction;
 mod register;
 mod execution;
 mod ram;
-mod core;
+pub mod core;
 mod subject;
 
 use self::instruction::Addressing;
 use self::instruction::Opcode;
 use self::instruction::Instruction;
 use self::execution::*;
-
 /*
 #[allow(unused_variables)]
 impl Spc700 {
