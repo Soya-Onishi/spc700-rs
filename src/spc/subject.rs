@@ -127,4 +127,95 @@ impl Subject {
             Addressing::Special => { (Subject::None, 0) }
         }
     }
+
+    pub fn read(self, spc: &Spc700) -> u16 {
+        match self {
+            Subject::Addr(addr, is_word) => {
+                let lsb = spc.ram.read(addr) as u16;
+                let msb =
+                    if is_word {
+                        spc.ram.read(addr.wrapping_add(1)) as u16
+                    } else {
+                        0
+                    };
+
+                msb << 8 | lsb
+            }
+            Subject::Bit(addr, bit) => {
+                let byte = spc.ram.read(addr);
+
+                ((byte >> bit) & 1) as u16
+            }
+            Subject::A => {
+                spc.reg.a as u16
+            }
+            Subject::X => {
+                spc.reg.x as u16
+            }
+            Subject::Y => {
+                spc.reg.y as u16
+            }
+            Subject::PSW => {
+                spc.reg.psw.get() as u16
+            }
+            Subject::SP => {
+                spc.reg.sp as u16
+            }
+            Subject::YA => {
+                let msb = spc.reg.y as u16;
+                let lsb = spc.reg.a as u16;
+
+                (msb << 8) | lsb
+            }
+            Subject::None => {
+                0
+            }
+        }
+    }
+
+    pub fn write(self, spc: &mut Spc700, data: u16) {
+        match self {
+            Subject::Addr(addr, is_word) => {
+                let lsb = data as u8;
+                spc.ram.write(addr, lsb);
+
+                if is_word {
+                    let msb = (data >> 8) as u8;
+                    spc.ram.write(addr.wrapping_add(1), msb);
+                }
+            }
+            Subject::Bit(addr, bit_pos) => {
+                let origin = spc.ram.read(addr);
+                let origin = origin & !(1 << bit_pos);
+                let data = (data as u8) << bit_pos;
+
+                spc.ram.write(addr, data | origin);
+            }
+            Subject::A => {
+                spc.reg.a = data as u8;
+            }
+            Subject::X => {
+                spc.reg.x = data as u8;
+            }
+            Subject::Y => {
+                spc.reg.y = data as u8;
+            }
+            Subject::YA => {
+                let y = (data >> 8) as u8;
+                let a = (data & 0x00ff) as u8;
+
+                spc.reg.y = y;
+                spc.reg.a = a;
+            }
+            Subject::SP => {
+                spc.reg.sp = data as u8;
+            }
+            Subject::PSW => {
+                spc.reg.psw.set(data as u8);
+            }
+            Subject::None => {
+                // nothing to do
+            }
+        }
+    }
 }
