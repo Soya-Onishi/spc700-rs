@@ -17,13 +17,13 @@ impl BinOp<u8> for Spc700 {
         let (op0_sub, incl) = Subject::new(self, inst.op0, false);
         self.reg.inc_pc(incl);
 
-        let op0 = self.read(op0_sub);
-        let op1 = self.read(op1_sub);
+        let op0 = op0_sub.read(self);
+        let op1 = op1_sub.read(self);
 
         let (res, pwd) = op(op0 as u8, op1 as u8);
 
         if inst.opcode != Opcode::CMP {
-            self.write(&op0_sub, res as u16);
+            op0_sub.write(self, res as u16);
         }
 
         pwd
@@ -37,11 +37,11 @@ impl BinOp<u16> for Spc700 {
         let (op0_sub, incl) = Subject::new(self, inst.op0, true);
         self.reg.inc_pc(incl);
 
-        let op0 = self.read(op0_sub);
-        let op1 = self.read(op1_sub);
+        let op0 = op0_sub.read(self);
+        let op1 = op1_sub.read(self);
 
         let (res, psw) = op(op0, op1);
-        self.write(&op0_sub, res);
+        op0_sub.write(self, res);
 
         psw
     }
@@ -56,10 +56,10 @@ impl UnaryOp<u8> for Spc700 {
         let (op0_sub, incl) = Subject::new(self, inst.op0, false);
         self.reg.inc_pc(incl);
 
-        let op0 = self.read(op0_sub);
+        let op0 = op0_sub.read(self);
 
         let (res, psw) = op(op0 as u8);
-        self.write(&op0_sub, res as u16);
+        op0_sub.write(self, res as u16);
 
         psw
     }
@@ -71,21 +71,22 @@ impl UnaryOp<(u8, bool)> for Spc700 {
         let (op0_sub, incl) = Subject::new(self, inst.op0, false);
         self.reg.inc_pc(incl);
 
-        let op0 = self.read(op0_sub);
+        let op0 = op0_sub.read(self);
 
         let (res, psw) = op((op0 as u8, self.reg.psw.carry()));
-        self.write(&op0_sub, res as u16);
+        op0_sub.write(self, res as u16);
 
         psw
     }
 }
 
-trait PullOperation<T> {
-    fn pull(&mut self) -> T;
+trait StackManipulation<T> {
+    fn push(&mut self, data: T);
+    fn pop(&mut self) -> T;
 }
 
-impl PullOperation<u8> for Spc700 {
-    fn pull(&mut self) -> u8 {
+impl StackManipulation<u8> for Spc700 {
+    fn pop(&mut self) -> u8 {
         let addr = 0x0100 | (self.reg.sp.wrapping_add(1) as u16);
         let byte = self.ram.read(addr);
 
@@ -93,10 +94,17 @@ impl PullOperation<u8> for Spc700 {
 
         byte
     }
+
+    fn push(&mut self, data: u8) {
+        let addr = 0x0100 | (self.reg.sp as u16);
+        self.ram.write(addr, data);
+
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+    }
 }
 
-impl PullOperation<u16> for Spc700 {
-    fn pull(&mut self) -> u16 {
+impl StackManipulation<u16> for Spc700 {
+    fn pop(&mut self) -> u16 {
         let addr_for_msb = 0x0100 | (self.reg.sp.wrapping_add(1) as u16);
         let addr_for_lsb = 0x0100 | (self.reg.sp.wrapping_add(2) as u16);
         let word_msb = self.ram.read(addr_for_msb) as u16;
@@ -106,22 +114,7 @@ impl PullOperation<u16> for Spc700 {
 
         (word_msb << 8) | word_lsb
     }
-}
 
-trait PushOperation<T> {
-    fn push(&mut self, data: T);
-}
-
-impl PushOperation<u8> for Spc700 {
-    fn push(&mut self, data: u8) {
-        let addr = 0x0100 | (self.reg.sp as u16);
-        self.ram.write(addr, data);
-
-        self.reg.sp = self.reg.sp.wrapping_sub(1);
-    }
-}
-
-impl PushOperation<u16> for Spc700 {
     fn push(&mut self, data: u16) {
         for i in 0..1 {
             let addr = 0x0100 | (self.reg.sp.wrapping_sub(i) as u16);
@@ -146,14 +139,16 @@ impl Spc700 {
         }
     }
 
-    pub fn execute(&mut self) {
+    pub fn execute(&mut self) -> u64 {
         let pc = self.reg.inc_pc(1);
         let opcode = self.ram.read(pc);
-        let inst = Instruction::decode(opcode);
+        let mut inst = Instruction::decode(opcode);
 
-        match inst.opcode {
+        let flag = match inst.opcode {
             Opcode::MOV => { self.binop(&inst, eight_alu::mov) }
             Opcode::MOVW => { self.binop(&inst, sixteen_alu::movw) }
+            Opcode::PUSH => { self.exec_push(&inst) }
+            Opcode::POP => { self.exec_pop(&inst) }
             Opcode::OR => { self.binop(&inst, eight_alu::or) }
             Opcode::AND => { self.binop(&inst, eight_alu::and) }
             Opcode::EOR => { self.binop(&inst, eight_alu::eor) }
@@ -189,66 +184,18 @@ impl Spc700 {
             Opcode::XCN => { self.unaryop(&inst, special::xcn) }
             Opcode::TCLR1 => { self.binop(&inst, special::tclr1) }
             Opcode::TSET1 => { self.binop(&inst, special::tset1) }
-            Opcode::BPL => {
-                let (psw, is_branch) = self.branch(&inst);
-                if is_branch { self.cycle_up(2) }
-                psw
-            }
-            Opcode::BMI => {
-                let (psw, is_branch) = self.branch(&inst);
-                if is_branch { self.cycle_up(2) }
-                psw
-            }
-            Opcode::BVC => {
-                let (psw, is_branch) = self.branch(&inst);
-                if is_branch { self.cycle_up(2) }
-                psw
-            }
-            Opcode::BVS => {
-                let (psw, is_branch) = self.branch(&inst);
-                if is_branch { self.cycle_up(2) }
-                psw
-            }
-            Opcode::BCC => {
-                let (psw, is_branch) = self.branch(&inst);
-                if is_branch { self.cycle_up(2) }
-                psw
-            }
-            Opcode::BCS => {
-                let (psw, is_branch) = self.branch(&inst);
-                if is_branch { self.cycle_up(2) }
-                psw
-            }
-            Opcode::BNE => {
-                let (psw, is_branch) = self.branch(&inst);
-                if is_branch { self.cycle_up(2) }
-                psw
-            }
-            Opcode::BEQ => {
-                let (psw, is_branch) = self.branch(&inst);
-                if is_branch { self.cycle_up(2) }
-                psw
-            }
-            Opcode::BBS => {
-                let (psw, is_branch) = self.branch(&inst);
-                if is_branch { self.cycle_up(2) }
-                psw
-            }
-            Opcode::BBC => {
-                let (psw, is_branch) = self.branch(&inst);
-                if is_branch { self.cycle_up(2) }
-                psw
-            }
-            Opcode::CBNE => {
-                let (psw, is_branch) = self.branch(&inst);
-                if is_branch { self.cycle_up(2) }
-                psw
-            }
-            Opcode::DBNZ => {
-                let (psw, is_branch) = self.branch(&inst);
-                if is_branch { self.cycle_up(2) }
-                psw
-            }
+            Opcode::BPL => { self.branch(&mut inst) }
+            Opcode::BMI => { self.branch(&mut inst) }
+            Opcode::BVC => { self.branch(&mut inst) }
+            Opcode::BVS => { self.branch(&mut inst) }
+            Opcode::BCC => { self.branch(&mut inst) }
+            Opcode::BCS => { self.branch(&mut inst) }
+            Opcode::BNE => { self.branch(&mut inst) }
+            Opcode::BEQ => { self.branch(&mut inst) }
+            Opcode::BBS => { self.branch(&mut inst) }
+            Opcode::BBC => { self.branch(&mut inst) }
+            Opcode::CBNE => { self.branch(&mut inst) }
+            Opcode::DBNZ => { self.branch(&mut inst) }
             Opcode::BRA => { self.relative_jump(&inst) }
             Opcode::JMP => { self.absolute_jump(&inst) }
             Opcode::CALL => { self.call(&inst) }
@@ -265,68 +212,29 @@ impl Spc700 {
             Opcode::EI => { self.ei() }
             Opcode::DI => { self.di() }
         };
+
+        self.renew_psw(flag);
+
+        inst.cycle
     }
 
-    fn cycle_up(&mut self, count: u64) {
+    fn renew_psw(&mut self, (flag, mask): Flag) {
+        // negate flags
+        let psw = self.reg.psw.get();
+        self.reg.psw.set(!(flag ^ mask) & psw);
 
-    }
-
-    fn read(&self, subject: Subject) -> u16 {
-        match subject {
-            Subject::Addr(addr, is_word) => {
-                let lsb = self.ram.read(addr) as u16;
-                let msb =
-                    if is_word {
-                        self.ram.read(addr.wrapping_add(1)) as u16
-                    } else {
-                        0
-                    };
-
-                msb << 8 | lsb
-            }
-            Subject::Bit(addr, bit) => {
-                let byte = self.ram.read(addr);
-
-                ((byte >> bit) & 1) as u16
-            }
-            Subject::A => {
-                self.reg.a as u16
-            }
-            Subject::X => {
-                self.reg.x as u16
-            }
-            Subject::Y => {
-                self.reg.y as u16
-            }
-            Subject::PSW => {
-                self.reg.psw.get() as u16
-            }
-            Subject::SP => {
-                self.reg.sp as u16
-            }
-            Subject::YA => {
-                let msb = self.reg.y as u16;
-                let lsb = self.reg.a as u16;
-
-                (msb << 8) | lsb
-            }
-            Subject::None => {
-                0
-            }
-        }
-    }
-
-    fn write(&mut self, dst: &Subject, data: u16) {
-
+        // assert flags
+        let psw = self.reg.psw.get();
+        self.reg.psw.set((flag & mask) | psw);
     }
 
     fn trans_into_decimal(&mut self, inst: &Instruction, op: impl Fn(u8, bool, bool) -> (u8, Flag)) -> Flag {
         let (op0_sub, inc) = Subject::new(self, inst.op0, false);
-        let op0 = self.read(op0_sub);
+        let op0 = op0_sub.read(self);
         self.reg.inc_pc(inc);
 
         let (res, psw) = op(op0 as u8, self.reg.psw.half(), self.reg.psw.carry());
-        self.write(&op0_sub, res as u16);
+        op0_sub.write(self, res as u16);
 
         psw
     }
@@ -337,26 +245,48 @@ impl Spc700 {
         let (op0_sub, incl) = Subject::new(self, inst.op0, false);
         self.reg.inc_pc(incl);
 
-        let op0 = self.read(op0_sub) as u8;
-        let op1 = self.read(op1_sub) as u8;
+        let op0 = op0_sub.read(self) as u8;
+        let op1 = op1_sub.read(self) as u8;
 
         let (res, pwd) = op(op0, op1, self.reg.psw.carry());
 
         if inst.opcode != Opcode::CMP {
-            self.write(&op0_sub, res as u16);
+            op0_sub.write(self, res as u16);
         }
 
         pwd
     }
 
-    fn branch(&mut self, inst: &Instruction) -> (Flag, bool) {
+    fn exec_push(&mut self, inst: &Instruction) -> Flag {
+        let (subject, inc) = Subject::new(self, inst.op0, false);
+        let data = subject.read(self);
+        self.reg.inc_pc(inc);
+
+        self.push(data);
+
+        (0x00, 0x00)
+    }
+
+    fn exec_pop(&mut self, inst: &Instruction) -> Flag {
+        let (subject, inc) = Subject::new(self, inst.op0, false);
+        let data = subject.read(self);
+        self.reg.inc_pc(inc);
+
+        let data:u8 = self.pop();
+
+        subject.write(self, data as u16);
+
+        (0x00, 0x00)
+    }
+
+    fn branch(&mut self, inst: &mut Instruction) -> Flag {
         let (op0_sub, incl) = Subject::new(self, inst.op0, false); // either psw, [aa], [aa+X] or y
         self.reg.inc_pc(incl);
-        let op0 = self.read(op0_sub);
+        let op0 = op0_sub.read(self);
 
         let (rr_sub, incl) =Subject::new(self, inst.op1, false);
         self.reg.inc_pc(incl);
-        let rr = self.read(rr_sub);
+        let rr = rr_sub.read(self);
 
         let (bias, is_branch) = match inst.opcode {
             Opcode::CBNE => {
@@ -366,7 +296,7 @@ impl Spc700 {
                 let byte = op0.wrapping_sub(1);
                 let (bias, is_branch) = condjump::dbnz(byte as u8, rr as u8);
 
-                self.write(&op0_sub, byte);
+                op0_sub.write(self, byte);
 
                 (bias, is_branch)
             }
@@ -377,12 +307,16 @@ impl Spc700 {
 
         self.reg.pc = self.reg.pc.wrapping_add(bias);
 
-        ((0x00, 0x00), is_branch)
+        if is_branch {
+            inst.cycle += 2;
+        }
+
+        (0x00, 0x00)
     }
 
     fn relative_jump(&mut self, inst: &Instruction) -> Flag {
         let (rr_sub, inc) = Subject::new(self,inst.op0, false);
-        let rr = self.read(rr_sub);
+        let rr = rr_sub.read(self);
         self.reg.inc_pc(inc);
 
 
@@ -403,7 +337,7 @@ impl Spc700 {
                 }
             }
             0x1f => {
-                self.read(addr_sub)
+                addr_sub.read(self)
             }
             _ => {
                 panic!("This code is unreacheable")
@@ -444,7 +378,7 @@ impl Spc700 {
     fn pcall(&mut self, inst: &Instruction) -> Flag {
         let (nn_sub, inc) = Subject::new(self, inst.op0, false);
         self.reg.inc_pc(inc);
-        let nn = self.read(nn_sub);
+        let nn = nn_sub.read(self);
         let dst = 0xff00 | nn;
 
         self.push(self.reg.pc);
@@ -454,15 +388,15 @@ impl Spc700 {
     }
 
     fn ret(&mut self) -> Flag {
-        let dst: u16 = self.pull();
+        let dst: u16 = self.pop();
         self.reg.pc = dst;
 
         (0x00, 0x00)
     }
 
     fn ret1(&mut self) -> Flag {
-        let psw: u8 = self.pull();
-        let pc: u16 = self.pull();
+        let psw: u8 = self.pop();
+        let pc: u16 = self.pop();
 
         self.reg.pc = pc;
         self.reg.psw.set(psw);
