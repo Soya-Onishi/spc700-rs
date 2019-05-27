@@ -70,7 +70,6 @@ pub enum Opcode {
     RET,
     RETI,
     BRK,
-    RESET,
 
     NOP,
     SLEEP,
@@ -103,7 +102,7 @@ pub const OPCODE_TABLE: [Opcode; 256] = [
     BEQ, TCALL, CLR1, BBC, MOV, MOV, MOV, MOV, MOV, MOV, MOV, MOV, INC, MOV, DBNZ, STOP, // 0xFX
 ];
 
-pub const INST_CYCLE_TABLE: [u8; 256] = [
+pub const INST_CYCLE_TABLE: [u64; 256] = [
     //0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
     2, 8, 4, 5, 3, 4, 3, 6, 2, 6, 5, 4, 5, 4, 6, 8, // 0x0X
     2, 8, 4, 5, 4, 5, 5, 6, 5, 1, 6, 5, 2, 2, 4, 6, // 0x1X
