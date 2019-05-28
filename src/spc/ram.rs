@@ -10,12 +10,6 @@ impl Ram {
         let r = Ram {
             ram: [0; 0x10000],
         };
-
-        let a: u8 = 8;
-        let b: &u8 = &a;
-        let c: u8 = b.clone();
-
-        r
     }
 
     pub fn load(&mut self, filename: String, start_pos: u16, set_pos: u16) {
