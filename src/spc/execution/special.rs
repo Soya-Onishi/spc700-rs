@@ -38,7 +38,7 @@ pub fn das(a: u8, half_flag: bool, carry_flag: bool) -> RetType {
 }
 
 pub fn xcn(acc: u8) -> RetType {
-    let res = (acc << 0xf0) | (acc >> 0x0f);
+    let res = (acc << 4) | (acc >> 4);
 
     let mask = 0b1000_0010;
     let sign = is_sign(res);

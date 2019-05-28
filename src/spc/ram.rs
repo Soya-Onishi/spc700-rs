@@ -7,9 +7,15 @@ pub struct Ram {
 
 impl Ram {
     pub fn new() -> Ram {
-        Ram {
+        let r = Ram {
             ram: [0; 0x10000],
-        }
+        };
+
+        let a: u8 = 8;
+        let b: &u8 = &a;
+        let c: u8 = b.clone();
+
+        r
     }
 
     pub fn load(&mut self, filename: String, start_pos: u16, set_pos: u16) {
@@ -18,6 +24,10 @@ impl Ram {
         let set_pos = set_pos as usize;
 
         for (offset, bin) in binaries[start_pos..].iter().enumerate() {
+            if bin.clone() != 0 {
+                println!("Loading...[{:#06x}] <= {:#04x}", set_pos + offset, bin);
+            }
+
             self.ram[set_pos + offset] = bin.clone();
         }
     }
@@ -28,6 +38,7 @@ impl Ram {
 
     pub fn write(&mut self, addr: u16, data: u8) {
         self.ram[addr as usize] = data;
+        println!("0x8000: {:#06x}", self.ram[0x8000]);
     }
 }
 

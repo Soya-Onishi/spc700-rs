@@ -25,8 +25,8 @@ impl Subject {
         }
 
         fn word_address(spc: &Spc700) -> u16 {
-            let msb_addr = spc.reg.pc;
-            let lsb_addr = spc.reg.pc.wrapping_add(1);
+            let lsb_addr = spc.reg.pc;
+            let msb_addr = spc.reg.pc.wrapping_add(1);
             let lsb = spc.ram.read(lsb_addr) as u16;
             let msb = spc.ram.read(msb_addr) as u16;
 
