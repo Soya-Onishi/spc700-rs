@@ -12,14 +12,14 @@ pub struct Register {
 }
 
 impl Register {
-    pub fn new() -> Register {
+    pub fn new(init_pc: u16) -> Register {
         Register {
             a: 0,
             x: 0,
             y: 0,
             sp: 0xef,
             psw: Flags::new(),
-            pc: 0,
+            pc: init_pc,
         }
     }
 

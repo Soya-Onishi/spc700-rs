@@ -132,9 +132,9 @@ pub struct Spc700 {
 }
 
 impl Spc700 {
-    pub fn new() -> Spc700 {
+    pub fn new(init_pc: u16) -> Spc700 {
         Spc700 {
-            reg: Register::new(),
+            reg: Register::new(init_pc),
             ram: Ram::new(),
         }
     }
@@ -214,6 +214,8 @@ impl Spc700 {
         };
 
         self.renew_psw(flag);
+
+        println!("pc: {:#06x}, inst: {:#?}", pc, inst.opcode);
 
         inst.cycle
     }
