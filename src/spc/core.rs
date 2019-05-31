@@ -116,7 +116,7 @@ impl StackManipulation<u16> for Spc700 {
     }
 
     fn push(&mut self, data: u16) {
-        for i in 0..1 {
+        for i in 0..2 {
             let addr = 0x0100 | (self.reg.sp.wrapping_sub(i) as u16);
             let byte = ((data >> (i * 8)) & 0xff) as u8;
             self.ram.write(addr, byte);
@@ -261,7 +261,7 @@ impl Spc700 {
 
     fn exec_push(&mut self, inst: &Instruction) -> Flag {
         let (subject, inc) = Subject::new(self, inst.op0, false);
-        let data = subject.read(self);
+        let data = subject.read(self) as u8;
         self.reg.inc_pc(inc);
 
         self.push(data);
