@@ -22,7 +22,7 @@ fn bitwise(op0: u8, op1: u8, f: impl Fn(u8, u8) -> u8) -> RetType {
     let res = f(op0, op1);
 
     let mask: u8 = 0b1000_0010;
-    let sign = is_zero(res);
+    let sign = is_sign(res);
     let zero = is_zero(res);
     let flag = sign | zero;
 
