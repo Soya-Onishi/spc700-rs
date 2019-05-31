@@ -1,5 +1,6 @@
 use super::core::Spc700;
 use super::instruction::Addressing;
+use super::instruction::PSWBit;
 
 #[derive(Copy, Clone)]
 pub enum Subject {
@@ -10,7 +11,7 @@ pub enum Subject {
     Y,
     YA,
     SP,
-    PSW,
+    PSW(PSWBit),
     None,
 }
 
@@ -55,8 +56,8 @@ impl Subject {
             Addressing::SP => {
                 (Subject::SP, 0)
             }
-            Addressing::PSW(_) => {
-                (Subject::PSW, 0)
+            Addressing::PSW(psw_bit) => {
+                (Subject::PSW(psw_bit), 0)
             }
             Addressing::Abs => {
                 (Subject::Addr(spc.reg.pc, word_access), 1)
@@ -155,8 +156,17 @@ impl Subject {
             Subject::Y => {
                 spc.reg.y as u16
             }
-            Subject::PSW => {
-                spc.reg.psw.get() as u16
+            Subject::PSW(bit) => {
+                match bit {
+                    PSWBit::ALL => { spc.reg.psw.get() as u16 }
+                    PSWBit::B => { spc.reg.psw.brk() as u16 }
+                    PSWBit::C => { spc.reg.psw.carry() as u16 }
+                    PSWBit::I => { spc.reg.psw.interrupt() as u16 }
+                    PSWBit::N => { spc.reg.psw.sign() as u16 }
+                    PSWBit::P => { spc.reg.psw.page() as u16 }
+                    PSWBit::V => { spc.reg.psw.overflow() as u16 }
+                    PSWBit::Z => { spc.reg.psw.zero() as u16 }
+                }
             }
             Subject::SP => {
                 spc.reg.sp as u16
@@ -192,6 +202,7 @@ impl Subject {
                 spc.ram.write(addr, data | origin);
             }
             Subject::A => {
+                println!("a = 0x{:02x}", data);
                 spc.reg.a = data as u8;
             }
             Subject::X => {
@@ -210,7 +221,7 @@ impl Subject {
             Subject::SP => {
                 spc.reg.sp = data as u8;
             }
-            Subject::PSW => {
+            Subject::PSW(_) => {
                 spc.reg.psw.set(data as u8);
             }
             Subject::None => {
