@@ -10,6 +10,8 @@ impl Ram {
         let r = Ram {
             ram: [0; 0x10000],
         };
+
+        r
     }
 
     pub fn load(&mut self, filename: String, start_pos: u16, set_pos: u16) {
@@ -32,7 +34,9 @@ impl Ram {
 
     pub fn write(&mut self, addr: u16, data: u8) {
         self.ram[addr as usize] = data;
-        println!("0x8000: {:#06x}", self.ram[0x8000]);
+        if addr == 0x8000 {
+            println!("0x8000: {:#06x}", self.ram[0x8000]);
+        }
     }
 }
 
