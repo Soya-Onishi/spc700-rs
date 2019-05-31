@@ -15,8 +15,8 @@ pub fn asl((op0, carry_flag): (u8, bool)) -> RetType {
 
 pub fn rol((op0, carry_flag): (u8, bool)) -> RetType {
     let shifter = |op, carry| -> u8 {
-        let c = if carry_flag { 1 } else { 0 };
-        op0 << 1  | c
+        let c: u8 = if carry_flag { 0x1 } else { 0 };
+        op << 1  | c
     };
     let is_carry = |op| -> bool {
         op & 0x80 > 0
