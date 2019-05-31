@@ -3,6 +3,7 @@ mod addressing;
 
 pub use self::opcode::Opcode;
 pub use self::addressing::Addressing;
+pub use self::addressing::PSWBit;
 
 pub struct Instruction {
     pub opcode: Opcode,

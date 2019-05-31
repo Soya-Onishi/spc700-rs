@@ -1,6 +1,6 @@
 mod flags;
 
-pub use self::flags::*;
+pub use self::flags::Flags;
 
 pub struct Register {
     pub a: u8,
