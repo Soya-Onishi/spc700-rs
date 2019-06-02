@@ -1,4 +1,6 @@
-pub type RetType = (u8, super::Flag);
+use super::*;
+
+pub type RetType = (u8, Flag);
 
 pub fn inc(op: u8) -> RetType {
     let res = op.wrapping_add(1);
@@ -16,8 +18,8 @@ pub fn dec(op: u8) -> RetType {
 
 fn gen_flag(res: u8) -> super::Flag {
     let mask = 0b1000_0010;
-    let zero = ((res == 0) as u8) << 1;
-    let sign = res & 0x80;
+    let zero = is_zero(res);
+    let sign = is_sign(res);
     let flag = (zero | sign) & mask;
 
     (flag, mask)
