@@ -1,4 +1,4 @@
-use super::Flag;
+use super::*;
 
 pub type RetType = (u8, Flag);
 
@@ -15,7 +15,7 @@ pub fn asl((op0, carry_flag): (u8, bool)) -> RetType {
 
 pub fn rol((op0, carry_flag): (u8, bool)) -> RetType {
     let shifter = |op, carry| -> u8 {
-        let c: u8 = if carry_flag { 0x1 } else { 0 };
+        let c: u8 = if carry { 1 } else { 0 };
         op << 1  | c
     };
     let is_carry = |op| -> bool {
@@ -38,8 +38,8 @@ pub fn lsr((op0, carry_flag): (u8, bool)) -> RetType {
 
 pub fn ror((op0, carry_flag): (u8, bool)) -> RetType {
     let shifter = |op, carry| -> u8 {
-        let c = if carry_flag { 0x80 } else { 0 };
-        op0 >> 1 | c
+        let c = if carry { 0x80 } else { 0 };
+        c | ((op0 >> 1) & 0x7f)
     };
     let is_carry = |op| -> bool {
         op & 1 > 0
@@ -53,8 +53,8 @@ fn shift(op0: u8, carry_flag: bool, shifter: impl Fn(u8, bool) -> u8, is_carry: 
 
     let mask = 0b1000_0011;
     let carry = is_carry(op0) as u8;
-    let sign = res & 0x80;
-    let zero = ((res == 0) as u8) << 1;
+    let sign = is_sign(res);
+    let zero = is_zero(res);
     let flag = mask & (carry | sign | zero);
 
     (res, (flag, mask))
