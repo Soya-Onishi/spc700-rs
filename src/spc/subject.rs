@@ -1,4 +1,5 @@
 use super::core::Spc700;
+use super::Instruction;
 use super::instruction::Addressing;
 use super::instruction::PSWBit;
 
@@ -17,7 +18,7 @@ pub enum Subject {
 
 impl Subject {
     // one of return values, u16, means pc incremental value
-    pub fn new(spc: &Spc700, addressing: Addressing, word_access: bool) -> (Subject, u16) {
+    pub fn new(spc: &Spc700, addressing: Addressing, raw_op: u8, word_access: bool) -> (Subject, u16) {
         fn set_msb(lsb: u8, spc: &Spc700) -> u16 {
             let lsb = lsb as u16;
             let msb = if spc.reg.psw.page() { 0x0100 } else { 0 };
@@ -115,7 +116,9 @@ impl Subject {
                 let abs = spc.ram.read(spc.reg.pc);
                 let abs = set_msb(abs, spc);
 
-                (Subject::Addr(abs, word_access), 1)
+                let bit = raw_op >> 5;
+
+                (Subject::Bit(abs, bit), 1)
             }
             Addressing::Abs13B => {
                 let bit_addr13 = word_address(spc);
@@ -202,7 +205,10 @@ impl Subject {
                 spc.ram.write(addr, data | origin);
             }
             Subject::A => {
-                println!("a = 0x{:02x}", data);
+                if data == 0xef {
+                    println!("0xef written");
+                }
+
                 spc.reg.a = data as u8;
             }
             Subject::X => {
@@ -221,8 +227,17 @@ impl Subject {
             Subject::SP => {
                 spc.reg.sp = data as u8;
             }
-            Subject::PSW(_) => {
-                spc.reg.psw.set(data as u8);
+            Subject::PSW(bit) => {
+                match bit {
+                    PSWBit::ALL => { spc.reg.psw.set(data as u8) }
+                    PSWBit::B => { spc.reg.psw.set_brk(data & 1 > 0)}
+                    PSWBit::C => { spc.reg.psw.set_carry(data & 1 > 0) }
+                    PSWBit::I => { spc.reg.psw.set_interrupt(data & 1 > 0)}
+                    PSWBit::N => { spc.reg.psw.set_sign(data & 1 > 0) }
+                    PSWBit::P => { spc.reg.psw.set_page(data & 1 > 0) }
+                    PSWBit::V => { spc.reg.psw.set_overflow(data & 1 > 0) }
+                    PSWBit::Z => { spc.reg.psw.set_zero(data & 1 > 0) }
+                }
             }
             Subject::None => {
                 // nothing to do
