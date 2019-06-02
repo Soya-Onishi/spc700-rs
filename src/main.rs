@@ -20,4 +20,6 @@ fn main() {
     while core.ram.read(0x8000) == 0x80 {
         core.execute();
     }
+
+    println!("0x8000: {:#06x}", core.ram.read(0x8000));
 }

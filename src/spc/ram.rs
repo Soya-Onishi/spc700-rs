@@ -33,9 +33,17 @@ impl Ram {
     }
 
     pub fn write(&mut self, addr: u16, data: u8) {
+        if addr == 0x0813 {
+            let mut sum: u32 = 0;
+            for i in 0..self.ram.len() {
+                sum = sum.wrapping_add(self.ram[i] as u32);
+            }
+            println!("sum({:#04x}): 0x{:#010x}", self.ram[0x813], sum);
+        }
+
         self.ram[addr as usize] = data;
-        if addr == 0x8000 {
-            println!("0x8000: {:#06x}", self.ram[0x8000]);
+        if addr == 0x8004 {
+            println!("0x8000 {:#06x}", self.ram[0x8000]);
         }
     }
 }
