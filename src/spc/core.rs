@@ -12,13 +12,19 @@ trait BinOp<T> {
 
 impl BinOp<u8> for Spc700 {
     fn binop(&mut self, inst: &Instruction, op: impl Fn(u8, u8) -> (u8, Flag)) -> Flag {
-        let (op1_sub, incl) = Subject::new(self, inst.op1, false);
+        let (op1_sub, incl) = Subject::new(self, inst.op1, inst.raw_op,false);
         self.reg.inc_pc(incl);
-        let (op0_sub, incl) = Subject::new(self, inst.op0, false);
+        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false);
         self.reg.inc_pc(incl);
 
         let op0 = op0_sub.read(self);
-        let op1 = op1_sub.read(self);
+        let mut op1 = op1_sub.read(self);
+
+        if inst.opcode == Opcode::AND1 || inst.opcode == Opcode::OR1 {
+            if inst.raw_op & 0x20 > 0 {
+               op1 = !op1;
+            }
+        }
 
         let (res, pwd) = op(op0 as u8, op1 as u8);
 
@@ -32,9 +38,9 @@ impl BinOp<u8> for Spc700 {
 
 impl BinOp<u16> for Spc700 {
     fn binop(&mut self, inst: &Instruction, op: impl Fn(u16, u16) -> (u16, Flag)) -> Flag {
-        let (op1_sub, incl) = Subject::new(self, inst.op1, true);
+        let (op1_sub, incl) = Subject::new(self, inst.op1, inst.raw_op, true);
         self.reg.inc_pc(incl);
-        let (op0_sub, incl) = Subject::new(self, inst.op0, true);
+        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, true);
         self.reg.inc_pc(incl);
 
         let op0 = op0_sub.read(self);
@@ -53,7 +59,7 @@ trait UnaryOp<T> {
 
 impl UnaryOp<u8> for Spc700 {
     fn unaryop(&mut self, inst: &Instruction, op: impl Fn(u8) -> (u8, Flag)) -> Flag {
-        let (op0_sub, incl) = Subject::new(self, inst.op0, false);
+        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false);
         self.reg.inc_pc(incl);
 
         let op0 = op0_sub.read(self);
@@ -68,7 +74,7 @@ impl UnaryOp<u8> for Spc700 {
 
 impl UnaryOp<(u8, bool)> for Spc700 {
     fn unaryop(&mut self, inst: &Instruction, op: impl Fn((u8, bool)) -> (u8, Flag)) -> Flag {
-        let (op0_sub, incl) = Subject::new(self, inst.op0, false);
+        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false);
         self.reg.inc_pc(incl);
 
         let op0 = op0_sub.read(self);
@@ -215,7 +221,7 @@ impl Spc700 {
 
         self.renew_psw(flag);
 
-        println!("pc: {:#06x}, inst: {:#?}", pc, inst.opcode);
+        // println!("pc: {:#06x}, inst: {:#?}", pc, inst.opcode);
 
         inst.cycle
     }
@@ -231,7 +237,7 @@ impl Spc700 {
     }
 
     fn trans_into_decimal(&mut self, inst: &Instruction, op: impl Fn(u8, bool, bool) -> (u8, Flag)) -> Flag {
-        let (op0_sub, inc) = Subject::new(self, inst.op0, false);
+        let (op0_sub, inc) = Subject::new(self, inst.op0, inst.raw_op, false);
         let op0 = op0_sub.read(self);
         self.reg.inc_pc(inc);
 
@@ -242,9 +248,9 @@ impl Spc700 {
     }
 
     fn calc_with_carry(&mut self, inst: &Instruction, op: impl Fn(u8, u8, bool) -> (u8, Flag)) -> Flag {
-        let (op1_sub, incl) = Subject::new(self, inst.op1, false);
+        let (op1_sub, incl) = Subject::new(self, inst.op1, inst.raw_op, false);
         self.reg.inc_pc(incl);
-        let (op0_sub, incl) = Subject::new(self, inst.op0, false);
+        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false);
         self.reg.inc_pc(incl);
 
         let op0 = op0_sub.read(self) as u8;
@@ -260,7 +266,7 @@ impl Spc700 {
     }
 
     fn exec_push(&mut self, inst: &Instruction) -> Flag {
-        let (subject, inc) = Subject::new(self, inst.op0, false);
+        let (subject, inc) = Subject::new(self, inst.op0, inst.raw_op, false);
         let data = subject.read(self) as u8;
         self.reg.inc_pc(inc);
 
@@ -270,7 +276,7 @@ impl Spc700 {
     }
 
     fn exec_pop(&mut self, inst: &Instruction) -> Flag {
-        let (subject, inc) = Subject::new(self, inst.op0, false);
+        let (subject, inc) = Subject::new(self, inst.op0, inst.raw_op, false);
         let data = subject.read(self);
         self.reg.inc_pc(inc);
 
@@ -282,11 +288,11 @@ impl Spc700 {
     }
 
     fn branch(&mut self, inst: &mut Instruction) -> Flag {
-        let (op0_sub, incl) = Subject::new(self, inst.op0, false); // either psw, [aa], [aa+X] or y
+        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false); // either psw, [aa], [aa+X] or y
         self.reg.inc_pc(incl);
         let op0 = op0_sub.read(self);
 
-        let (rr_sub, incl) =Subject::new(self, inst.op1, false);
+        let (rr_sub, incl) =Subject::new(self, inst.op1, inst.raw_op, false);
         self.reg.inc_pc(incl);
         let rr = rr_sub.read(self);
 
@@ -317,7 +323,7 @@ impl Spc700 {
     }
 
     fn relative_jump(&mut self, inst: &Instruction) -> Flag {
-        let (rr_sub, inc) = Subject::new(self,inst.op0, false);
+        let (rr_sub, inc) = Subject::new(self,inst.op0, inst.raw_op, false);
         let rr = rr_sub.read(self);
         self.reg.inc_pc(inc);
 
@@ -328,7 +334,7 @@ impl Spc700 {
     }
 
     fn absolute_jump(&mut self, inst: &Instruction) -> Flag {
-        let (addr_sub, inc) = Subject::new(self, inst.op0, true);
+        let (addr_sub, inc) = Subject::new(self, inst.op0, inst.raw_op, true);
         self.reg.inc_pc(inc);
 
         let dst = match inst.raw_op {
@@ -352,7 +358,7 @@ impl Spc700 {
     }
 
     fn call(&mut self, inst: &Instruction) -> Flag {
-        let (subject, inc) = Subject::new(self, inst.op0, false);
+        let (subject, inc) = Subject::new(self, inst.op0, inst.raw_op, false);
         self.reg.inc_pc(inc);
 
         let dst = match subject {
@@ -378,7 +384,7 @@ impl Spc700 {
     }
 
     fn pcall(&mut self, inst: &Instruction) -> Flag {
-        let (nn_sub, inc) = Subject::new(self, inst.op0, false);
+        let (nn_sub, inc) = Subject::new(self, inst.op0, inst.raw_op, false);
         self.reg.inc_pc(inc);
         let nn = nn_sub.read(self);
         let dst = 0xff00 | nn;
