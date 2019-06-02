@@ -43,7 +43,7 @@ pub fn setc(_dummy0: u8, _dummy1: u8) -> RetType {
 }
 
 pub fn notc(c: u8, _dummy: u8) -> RetType {
-    (!c & 1, PSW_FLAG)
+    (c ^ 1, PSW_FLAG)
 }
 
 pub fn clrv(psw: u8, _dummy1: u8) -> RetType {
