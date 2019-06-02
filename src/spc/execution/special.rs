@@ -11,10 +11,10 @@ macro_rules! adjust {
                  ($acc, 0)
             };
         let res =
-            if (($acc & 0x0f) > 0x09) || $half {
-                $acc.$wrapper(0x06)
+            if ((tmp & 0x0f) > 0x09) || $half {
+                tmp.$wrapper(0x06)
             } else {
-                $acc
+                tmp
             };
 
         let mask = 0b1000_0011;
@@ -26,15 +26,48 @@ macro_rules! adjust {
     }}
 }
 
-pub fn daa(a: u8, half_flag: bool, carry_flag: bool) -> RetType {
-    adjust!(a, wrapping_add, half_flag, carry_flag)
+pub fn daa(acc: u8, half_flag: bool, carry_flag: bool) -> RetType {
+    let (tmp, carry) =
+        if (acc > 0x99) || carry_flag {
+            (acc.wrapping_add(0x60), 0b0000_0001)
+        } else {
+            (acc, 0b0000_0000)
+        };
+    let res =
+        if ((tmp & 0x0f) > 0x09) || half_flag {
+            tmp.wrapping_add(0x06)
+        } else {
+            tmp
+        };
+
+    let mask = 0b1000_0011;
+    let sign = is_sign(res);
+    let zero = is_zero(res);
+    let flag = (sign | zero | carry) & mask;
+
+    (res, (flag, mask))
 }
 
-pub fn das(a: u8, half_flag: bool, carry_flag: bool) -> RetType {
-    let half_flag = !half_flag;
-    let carry_flag = !carry_flag;
+pub fn das(acc: u8, half_flag: bool, carry_flag: bool) -> RetType {
+    let (tmp, carry) =
+        if (acc > 0x99) || !carry_flag {
+            (acc.wrapping_sub(0x60), 0b0000_0000)
+        } else {
+            (acc, 0b0000_0001)
+        };
+    let res =
+        if ((tmp & 0x0f) > 0x09) || !half_flag {
+            tmp.wrapping_sub(0x06)
+        } else {
+            tmp
+        };
 
-    adjust!(a, wrapping_sub, half_flag, carry_flag)
+    let mask = 0b1000_0011;
+    let sign = is_sign(res);
+    let zero = is_zero(res);
+    let flag = (sign | zero | carry) & mask;
+
+    (res, (flag, mask))
 }
 
 pub fn xcn(acc: u8) -> RetType {
