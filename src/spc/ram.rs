@@ -21,7 +21,7 @@ impl Ram {
 
         for (offset, bin) in binaries[start_pos..].iter().enumerate() {
             if bin.clone() != 0 {
-                println!("Loading...[{:#06x}] <= {:#04x}", set_pos + offset, bin);
+                // println!("Loading...[{:#06x}] <= {:#04x}", set_pos + offset, bin);
             }
 
             self.ram[set_pos + offset] = bin.clone();
@@ -38,12 +38,12 @@ impl Ram {
             for i in 0..self.ram.len() {
                 sum = sum.wrapping_add(self.ram[i] as u32);
             }
-            println!("sum({:#04x}): 0x{:#010x}", self.ram[0x813], sum);
+            // println!("sum({:#04x}): 0x{:#010x}", self.ram[0x813], sum);
         }
 
         self.ram[addr as usize] = data;
         if addr == 0x8004 {
-            println!("0x8000 {:#06x}", self.ram[0x8000]);
+            // println!("0x8000 {:#06x}", self.ram[0x8000]);
         }
     }
 }

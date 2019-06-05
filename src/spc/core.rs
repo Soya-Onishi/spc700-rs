@@ -32,6 +32,16 @@ impl BinOp<u8> for Spc700 {
             op0_sub.write(self, res as u16);
         }
 
+        let pwd = match inst.opcode {
+            Opcode::MOV => {
+                match op0_sub {
+                    Subject::Addr(_, _) => { (0x0, 0x0) }
+                    _ => { pwd }
+                }
+            }
+            _ => { pwd }
+        };
+
         pwd
     }
 }
@@ -150,6 +160,9 @@ impl Spc700 {
         let opcode = self.ram.read(pc);
         let mut inst = Instruction::decode(opcode);
 
+        println!("pc:{:#06x}, opcode:{:#04x}, a:{:#04x}, x:{:#04x}, y:{:#04x}, sp:{:#04x}, psw:{:#04x}",
+                 pc, opcode, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());
+        
         let flag = match inst.opcode {
             Opcode::MOV => { self.binop(&inst, eight_alu::mov) }
             Opcode::MOVW => { self.binop(&inst, sixteen_alu::movw) }
@@ -307,6 +320,12 @@ impl Spc700 {
                 op0_sub.write(self, byte);
 
                 (bias, is_branch)
+            }
+            Opcode::BBS => {
+                condjump::branch(op0 as u8, rr as u8, true)
+            }
+            Opcode::BBC => {
+                condjump::branch(op0 as u8, rr as u8, false)
             }
             _ => {
                 condjump::branch(op0 as u8, rr as u8, inst.raw_op & 0x20 > 0)

@@ -61,7 +61,9 @@ impl Subject {
                 (Subject::PSW(psw_bit), 0)
             }
             Addressing::Abs => {
-                (Subject::Addr(spc.reg.pc, word_access), 1)
+                let abs = spc.ram.read(spc.reg.pc);
+                let addr = set_msb(abs, spc);
+                (Subject::Addr(addr, word_access), 1)
             }
             Addressing::AbsX => {
                 let abs = spc.ram.read(spc.reg.pc);
@@ -206,7 +208,7 @@ impl Subject {
             }
             Subject::A => {
                 if data == 0xef {
-                    println!("0xef written");
+                    // println!("0xef written");
                 }
 
                 spc.reg.a = data as u8;
