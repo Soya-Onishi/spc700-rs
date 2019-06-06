@@ -438,7 +438,10 @@ impl Spc700 {
         let pc_msb = self.ram.read(0xffdf) as u16;
         self.reg.pc = (pc_msb << 8) | pc_lsb;
 
-        (0b0001_0000, 0b0001_0100)
+        self.reg.psw.assert_brk();
+        self.reg.psw.negate_interrupt();
+
+        (0x00, 0x00)
     }
 
     fn clrp(&mut self) -> Flag {
