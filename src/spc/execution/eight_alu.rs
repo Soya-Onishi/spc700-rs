@@ -30,31 +30,35 @@ fn bitwise(op0: u8, op1: u8, f: impl Fn(u8, u8) -> u8) -> RetType {
 }
 
 pub fn cmp(op0: u8, op1: u8) -> RetType {
-    let res = op0.wrapping_sub(op1);
+    let op0 = op0 as u16;
+    let op1 = !op1 as u16;
+    let res = op0.wrapping_add(op1).wrapping_add(1);
 
     let mask = 0b1000_0011;
-    let sign = is_sign(res);
-    let zero = is_zero(res);
-    let carry = is_carry(op0, res);
+    let sign = is_sign(res as u8);
+    let zero = is_zero(res as u8);
+    let carry = is_carry(res);
     let flag = (sign | zero | carry) & mask;
 
-    (res, (flag, mask))
+    (res as u8, (flag, mask))
 }
 
 pub fn adc(op0: u8, op1: u8, carry_flag: bool) -> RetType {
-    let c: u8 = if carry_flag { 1 } else { 0 };
+    let op0 = op0 as u16;
+    let op1 = op1 as u16;
+    let c: u16 = if carry_flag { 1 } else { 0 };
 
     let res = op0.wrapping_add(op1).wrapping_add(c);
 
     let mask = 0b1100_1011;
-    let zero = is_zero(res);
-    let sign = is_sign(res);
-    let half = is_half(op0, op1, res);
-    let carry = is_carry(op0, res);
-    let overflow = is_overflow(op0, op1, res);
+    let zero = is_zero(res as u8);
+    let sign = is_sign(res as u8);
+    let half = is_half(op0 as u8, op1 as u8, res as u8);
+    let carry = is_carry(res);
+    let overflow = is_overflow(op0 as u8, op1 as u8, res as u8);
     let flag = (zero | sign | half | carry | overflow) & mask;
 
-    (res, (flag, mask))
+    (res as u8, (flag, mask))
 }
 
 pub fn sbc(op0: u8, op1: u8, carry_flag: bool) -> RetType {

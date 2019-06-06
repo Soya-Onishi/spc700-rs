@@ -9,8 +9,8 @@ pub mod jump;
 
 pub type Flag = (u8, u8); // (Flag from execution, mask of Flag)
 
-fn is_carry(op0: u8, res: u8) -> u8 {
-    (op0 > res) as u8
+fn is_carry(res: u16) -> u8 {
+    (res > 0xff) as u8
 }
 
 fn is_zero(value: u8) -> u8 {
