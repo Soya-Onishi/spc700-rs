@@ -18,7 +18,7 @@ pub fn not1(bit: u8, _dummy: u8) -> RetType {
     (!bit & 1, PSW_FLAG)
 }
 
-pub fn mov1(bit: u8, _dummy: u8) -> RetType {
+pub fn mov1(_dummy: u8, bit: u8) -> RetType {
     (bit, PSW_FLAG)
 }
 

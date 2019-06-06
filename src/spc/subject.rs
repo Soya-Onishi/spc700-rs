@@ -18,7 +18,7 @@ pub enum Subject {
 
 impl Subject {
     // one of return values, u16, means pc incremental value
-    pub fn new(spc: &Spc700, addressing: Addressing, raw_op: u8, word_access: bool) -> (Subject, u16) {
+    pub fn new(spc: &mut Spc700, addressing: Addressing, raw_op: u8, word_access: bool) -> (Subject, u16) {
         fn set_msb(lsb: u8, spc: &Spc700) -> u16 {
             let lsb = lsb as u16;
             let msb = if spc.reg.psw.page() { 0x0100 } else { 0 };
@@ -26,7 +26,7 @@ impl Subject {
             msb | lsb
         }
 
-        fn word_address(spc: &Spc700) -> u16 {
+        fn word_address(spc: &mut Spc700) -> u16 {
             let lsb_addr = spc.reg.pc;
             let msb_addr = spc.reg.pc.wrapping_add(1);
             let lsb = spc.ram.read(lsb_addr) as u16;
@@ -134,7 +134,7 @@ impl Subject {
         }
     }
 
-    pub fn read(self, spc: &Spc700) -> u16 {
+    pub fn read(self, spc: &mut Spc700) -> u16 {
         match self {
             Subject::Addr(addr, is_word) => {
                 let lsb = spc.ram.read(addr) as u16;
