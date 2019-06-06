@@ -1,14 +1,20 @@
 use super::core::Spc700;
 use std::fs;
+use std::collections::HashMap;
+use std::cmp::Ordering;
 
 pub struct Ram {
-    ram: [u8; 0x10000],
+    pub ram: [u8; 0x10000],
+    pub read_log: Vec<(u16, u8)>,
+    pub write_log: Vec<(u16, u8)>,
 }
 
 impl Ram {
     pub fn new() -> Ram {
         let r = Ram {
             ram: [0; 0x10000],
+            read_log: Vec::new(),
+            write_log: Vec::new(),
         };
 
         r
@@ -28,8 +34,10 @@ impl Ram {
         }
     }
 
-    pub fn read(&self, addr: u16) -> u8 {
-        self.ram[addr as usize]
+    pub fn read(&mut self, addr: u16) -> u8 {
+        let data = self.ram[addr as usize];
+        self.read_log.push((addr, data));
+        data
     }
 
     pub fn write(&mut self, addr: u16, data: u8) {
@@ -45,6 +53,8 @@ impl Ram {
         if addr == 0x8004 {
             // println!("0x8000 {:#06x}", self.ram[0x8000]);
         }
+
+        self.write_log.push((addr, data));
     }
 }
 
