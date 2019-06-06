@@ -121,10 +121,10 @@ impl StackManipulation<u8> for Spc700 {
 
 impl StackManipulation<u16> for Spc700 {
     fn pop(&mut self) -> u16 {
-        let addr_for_msb = 0x0100 | (self.reg.sp.wrapping_add(1) as u16);
-        let addr_for_lsb = 0x0100 | (self.reg.sp.wrapping_add(2) as u16);
-        let word_msb = self.ram.read(addr_for_msb) as u16;
+        let addr_for_lsb = 0x0100 | (self.reg.sp.wrapping_add(1) as u16);
+        let addr_for_msb = 0x0100 | (self.reg.sp.wrapping_add(2) as u16);
         let word_lsb = self.ram.read(addr_for_lsb) as u16;
+        let word_msb = self.ram.read(addr_for_msb) as u16;
 
         self.reg.sp =self.reg.sp.wrapping_add(2);
 
@@ -132,13 +132,12 @@ impl StackManipulation<u16> for Spc700 {
     }
 
     fn push(&mut self, data: u16) {
-        for i in 0..2 {
-            let addr = 0x0100 | (self.reg.sp.wrapping_sub(i) as u16);
+        for i in (0..2).rev() {
+            let addr = 0x0100 | (self.reg.sp as u16);
             let byte = ((data >> (i * 8)) & 0xff) as u8;
             self.ram.write(addr, byte);
+            self.reg.sp = self.reg.sp.wrapping_sub(1);
         }
-
-        self.reg.sp = self.reg.sp.wrapping_sub(2);
     }
 }
 
