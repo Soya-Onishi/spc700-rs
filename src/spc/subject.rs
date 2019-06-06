@@ -99,20 +99,22 @@ impl Subject {
                 (Subject::Addr(addr, word_access), 2)
             }
             Addressing::IndAbsX => {
-                let abs = spc.ram.read(spc.reg.pc);
-                let abs_x = abs.wrapping_add(spc.reg.x);
-                let abs_x = set_msb(abs_x, spc);
-                let addr = spc.ram.read(abs_x);
+                let ind_addr = spc.ram.read(spc.reg.pc);
+                let abs_lsb = spc.ram.read(set_msb(ind_addr, spc)) as u16;
+                let abs_msb = spc.ram.read(set_msb(ind_addr.wrapping_add(1), spc)) as u16;
+                let abs = (abs_msb << 8) | abs_lsb;
+                let addr = abs.wrapping_add(spc.reg.x as u16);
 
-                (Subject::Addr(set_msb(addr, spc), word_access), 1)
+                (Subject::Addr(addr, word_access), 1)
             }
             Addressing::IndAbsY => {
-                let abs = spc.ram.read(spc.reg.pc);
-                let abs = set_msb(abs, spc);
-                let ind = spc.ram.read(abs);
-                let addr = ind.wrapping_add(spc.reg.y);
+                let ind_addr = spc.ram.read(spc.reg.pc);
+                let abs_lsb = spc.ram.read(set_msb(ind_addr, spc)) as u16;
+                let abs_msb = spc.ram.read(set_msb(ind_addr.wrapping_add(1), spc)) as u16;
+                let abs = (abs_msb << 8) | abs_lsb;
+                let addr = abs.wrapping_add(spc.reg.y as u16);
 
-                (Subject::Addr(set_msb(addr, spc), word_access), 1)
+                (Subject::Addr(addr, word_access), 1)
             }
             Addressing::AbsB => {
                 let abs = spc.ram.read(spc.reg.pc);
