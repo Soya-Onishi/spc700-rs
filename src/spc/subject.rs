@@ -202,7 +202,7 @@ impl Subject {
                 }
             }
             Subject::Bit(addr, bit_pos) => {
-                let origin = spc.ram.read(addr);
+                let origin = spc.ram.ram[addr as usize];
                 let origin = origin & !(1 << bit_pos);
                 let data = (data as u8) << bit_pos;
 
