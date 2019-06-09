@@ -31,17 +31,7 @@ impl BinOp<u8> for Spc700 {
         if inst.opcode != Opcode::CMP {
             op0_sub.write(self, res as u16);
         }
-
-        let pwd = match inst.opcode {
-            Opcode::MOV => {
-                match op0_sub {
-                    Subject::Addr(_, _) => { (0x0, 0x0) }
-                    _ => { pwd }
-                }
-            }
-            _ => { pwd }
-        };
-
+        
         pwd
     }
 }
@@ -159,12 +149,12 @@ impl Spc700 {
         let opcode = self.ram.read(pc);
         let mut inst = Instruction::decode(opcode);
 
-        println!("pc:{:#06x}, opcode:{:#04x}, a:{:#04x}, x:{:#04x}, y:{:#04x}, sp:{:#04x}, psw:{:#04x}",
-                 pc, opcode, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());
+        //println!("pc:{:#06x}, opcode:{:#04x}, a:{:#04x}, x:{:#04x}, y:{:#04x}, sp:{:#04x}, psw:{:#04x}",
+        //pc, opcode, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());
         
         let flag = match inst.opcode {
-            Opcode::MOV => { self.binop(&inst, eight_alu::mov) }
-            Opcode::MOVW => { self.binop(&inst, sixteen_alu::movw) }
+            Opcode::MOV => { self.exec_mov(&inst) }
+            Opcode::MOVW => { self.exec_movw(&inst) }
             Opcode::PUSH => { self.exec_push(&inst) }
             Opcode::POP => { self.exec_pop(&inst) }
             Opcode::OR => { self.binop(&inst, eight_alu::or) }
@@ -277,6 +267,57 @@ impl Spc700 {
         pwd
     }
 
+    fn exec_mov(&mut self, inst: &Instruction) -> Flag {
+        let (op1_sub, incl) = Subject::new(self, inst.op1, inst.raw_op, false);
+        self.reg.inc_pc(incl);
+        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false);
+        self.reg.inc_pc(incl);
+
+        let op1 = op1_sub.read(self) as u8;
+        
+        let (res, pwd) = eight_alu::mov(op1);
+
+        let pwd = match op0_sub {
+            Subject::Addr(addr, _) if (inst.raw_op != 0xFA) && (inst.raw_op != 0xAF) => {
+                if (inst.raw_op != 0xFA) && (inst.raw_op != 0xAF) {
+                    self.ram.read(addr);
+                }
+
+                (0x00, 0x00)
+                
+            }
+            _ => { pwd }
+        };
+
+        
+        op0_sub.write(self, res as u16);
+
+        pwd
+    }
+
+    fn exec_movw(&mut self, inst: &Instruction) -> Flag {
+        let (op1_sub, incl) = Subject::new(self, inst.op1, inst.raw_op, true);
+        self.reg.inc_pc(incl);
+        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, true);
+        self.reg.inc_pc(incl);
+
+        let op1 = op1_sub.read(self);
+        
+        let (res, pwd) = sixteen_alu::movw(op1);
+
+        let pwd = match op0_sub {
+            Subject::Addr(addr, _) => {
+                self.ram.read(addr);
+                (0x00, 0x00)
+            }
+            _ => { pwd }
+        };
+        
+        op0_sub.write(self, res);
+
+        pwd
+    }
+    
     fn exec_push(&mut self, inst: &Instruction) -> Flag {
         let (subject, inc) = Subject::new(self, inst.op0, inst.raw_op, false);
         let data = subject.read(self) as u8;
@@ -345,7 +386,12 @@ impl Spc700 {
         let rr = rr_sub.read(self);
         self.reg.inc_pc(inc);
 
-
+        let rr = if (rr & 0x80) > 0 {
+            (rr | 0xff00)
+        } else {
+            rr
+        };
+            
         self.reg.pc = self.reg.pc.wrapping_add(rr);
 
         (0x00, 0x00)

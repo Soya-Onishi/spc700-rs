@@ -1,6 +1,6 @@
 pub type RetType = (u16, super::Flag);
 
-pub fn movw(_dummy: u16, src: u16) -> RetType {
+pub fn movw(src: u16) -> RetType {
     let mask = 0b1000_0010;
     let sign = (src & 0x8000 > 0) as u8;
     let zero = (src & 0xff00 == 0) as u8;
