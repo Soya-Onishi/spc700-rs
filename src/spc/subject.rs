@@ -99,11 +99,11 @@ impl Subject {
                 (Subject::Addr(addr, word_access), 2)
             }
             Addressing::IndAbsX => {
-                let ind_addr = spc.ram.read(spc.reg.pc);
-                let abs_lsb = spc.ram.read(set_msb(ind_addr, spc)) as u16;
-                let abs_msb = spc.ram.read(set_msb(ind_addr.wrapping_add(1), spc)) as u16;
-                let abs = (abs_msb << 8) | abs_lsb;
-                let addr = abs.wrapping_add(spc.reg.x as u16);
+                let ind = spc.ram.read(spc.reg.pc);
+                let ind_x = ind.wrapping_add(spc.reg.x);
+                let abs_lsb = spc.ram.read(set_msb(ind_x, spc)) as u16;
+                let abs_msb = spc.ram.read(set_msb(ind_x.wrapping_add(1), spc)) as u16;
+                let addr = (abs_msb << 8) | abs_lsb;
 
                 (Subject::Addr(addr, word_access), 1)
             }
@@ -117,8 +117,8 @@ impl Subject {
                 (Subject::Addr(addr, word_access), 1)
             }
             Addressing::AbsB => {
-                let abs = spc.ram.read(spc.reg.pc);
-                let abs = set_msb(abs, spc);
+                let abs = spc.ram.read(spc.reg.pc) as u16;
+                // let abs = set_msb(abs, spc);
 
                 let bit = raw_op >> 5;
 

@@ -17,16 +17,28 @@ fn main() {
     while core.ram.ram[0x8000] == 0 {
         core.execute();
 
-        print_log(&mut core)
+        // print_log(&mut core);
     }
 
     while core.ram.ram[0x8000] == 0x80 {
         core.execute();
 
-        print_log(&mut core)
+        // print_log(&mut core);
     }
 
     println!("0x8000: {:#06x}", core.ram.ram[0x8000]);
+
+    let mut offset: usize = 0x8004;
+    loop {
+        if core.ram.ram[offset] == 0 {
+            break;
+        }
+
+        print!("{}", core.ram.ram[offset] as char);
+        
+        offset += 1;
+    }
+    println!()
 }
 
 fn print_log(core: &mut Spc700) {

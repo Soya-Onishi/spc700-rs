@@ -50,8 +50,11 @@ impl Ram {
         }
 
         self.ram[addr as usize] = data;
-        if addr == 0x8004 {
-            // println!("0x8000 {:#06x}", self.ram[0x8000]);
+        if addr == 0x800F {
+            for i in 0x4..0xF {
+                print!("{}", self.ram[0x8000 + i] as char);               
+            }
+            println!("");
         }
 
         self.write_log.push((addr, data));
