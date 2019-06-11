@@ -17,13 +17,13 @@ fn main() {
     while core.ram.ram[0x8000] == 0 {
         core.execute();
 
-        // print_log(&mut core);
+        print_log(&mut core);
     }
 
     while core.ram.ram[0x8000] == 0x80 {
         core.execute();
 
-        // print_log(&mut core);
+        print_log(&mut core);
     }
 
     println!("0x8000: {:#06x}", core.ram.ram[0x8000]);
