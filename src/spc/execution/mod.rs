@@ -19,7 +19,7 @@ fn is_zero(value: u8) -> u8 {
 }
 
 fn is_half(op0: u8, op1: u8, res: u8) -> u8 {
-    let flag = (((op0 ^ op1 ^ res) & 0x10) > 0) as u8;
+    let flag = (((op0 ^ op1 ^ res) & 0x10) != 0) as u8;
     flag << 3
 }
 

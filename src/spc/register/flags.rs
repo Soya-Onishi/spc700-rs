@@ -92,9 +92,9 @@ impl Flags {
         self.n = convert(pwd, 7);
         self.v = convert(pwd, 6);
         self.p = convert(pwd, 5);
-        // self.b = convert(pwd, 4);
+        self.b = convert(pwd, 4);
         self.h = convert(pwd, 3);
-        // self.i = convert(pwd, 2);
+        self.i = convert(pwd, 2);
         self.z = convert(pwd, 1);
         self.c = convert(pwd, 0);
     }

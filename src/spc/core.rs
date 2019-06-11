@@ -149,8 +149,8 @@ impl Spc700 {
         let opcode = self.ram.read(pc);
         let mut inst = Instruction::decode(opcode);
 
-        //println!("pc:{:#06x}, opcode:{:#04x}, a:{:#04x}, x:{:#04x}, y:{:#04x}, sp:{:#04x}, psw:{:#04x}",
-        //pc, opcode, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());
+        println!("pc:{:#06x}, opcode:{:#04x}, a:{:#04x}, x:{:#04x}, y:{:#04x}, sp:{:#04x}, psw:{:#04x}",
+                 pc, opcode, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());
         
         let flag = match inst.opcode {
             Opcode::MOV => { self.exec_mov(&inst) }

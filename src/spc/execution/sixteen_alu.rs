@@ -1,42 +1,55 @@
+use super::eight_alu::{adc, sbc};
+
 pub type RetType = (u16, super::Flag);
 
 pub fn movw(src: u16) -> RetType {
     let mask = 0b1000_0010;
     let sign = (src & 0x8000 > 0) as u8;
-    let zero = (src & 0xff00 == 0) as u8;
+    let zero = (src == 0) as u8;
     let flag = (sign << 7) | (zero << 1);
 
     (src, (mask, flag))
 }
 
 pub fn addw(op0: u16, op1: u16) -> RetType {
-    let res = op0.wrapping_add(op1);
-
-    let mask = 0b1100_1011;
-    let sign = is_sign(res);
-    let overflow = is_overflow(op0, op1, res);
-    let half = is_half(op0, op1, res);
-    let zero = is_zero(res);
-    let carry = is_carry(op0, res);
-    let flag = (sign | overflow | half | zero | carry) & mask;
-
-    (res, (flag, mask))
+    arithmetic(op0, op1, false, adc)
 }
 
 pub fn subw(op0: u16, op1: u16) -> RetType {
-    addw(op0, (!op1).wrapping_add(1))
+    arithmetic(op0, op1, true, sbc)
+}
+
+fn arithmetic(op0: u16, op1: u16, is_sbc: bool, op: impl Fn(u8, u8, bool) -> (u8, super::Flag)) -> RetType {
+    let op0_lsb = op0 as u8;
+    let op1_lsb = op1 as u8;
+    let op0_msb = (op0 >> 8) as u8;
+    let op1_msb = (op1 >> 8) as u8;
+
+    let (lsb, (flag, _)) = op(op0_lsb, op1_lsb, is_sbc);
+    let carry = (flag & 0x1) > 0;
+    let (msb, (flag, mask)) = op(op0_msb, op1_msb, carry);
+
+    let res = ((msb as u16) << 8) | (lsb as u16);
+    let zero = is_zero(res);
+
+    let flag = (flag & (0b1111_1101)) | zero;
+
+    (res, (flag, mask))
 }
 
 pub fn cmpw(op0: u16, op1: u16) -> RetType {
+    let op0 = op0 as u32;
+    let op1 = op1 as u32;
+
     let res = op0.wrapping_sub(op1);
 
     let mask = 0b1000_0011;
-    let sign = is_sign(res);
-    let zero = is_zero(res);
-    let carry = is_carry(op0, res);
+    let sign = is_sign(res as u16);
+    let zero = is_zero(res as u16);
+    let carry = is_carry(res);
     let flag = (sign | zero | carry) & mask;
 
-    (res, (flag, mask))
+    (res as u16, (flag, mask))
 }
 
 pub fn incw(op: u16, _dummy: u16) -> RetType {
@@ -132,7 +145,11 @@ fn is_overflow(op0: u16, op1: u16, res: u16) -> u8 {
 }
 
 fn is_half(op0: u16, op1: u16, res: u16) -> u8 {
-    let flag = ((op0 ^ op1 ^ res) & 0x1000) > 1;
+    let op0 = (op0 >> 8) as u8;
+    let op1 = (op1 >> 8) as u8;
+    let res = (res >> 8) as u8;
+
+    let flag = ((op0 ^ op1 ^ res) & 0x10) > 1;
     (flag as u8) << 3
 }
 
@@ -141,6 +158,8 @@ fn is_zero(res: u16) -> u8 {
     (flag as u8) << 1
 }
 
-fn is_carry(op0: u16, res: u16) -> u8 {
-    (op0 > res) as u8
+fn is_carry(res: u32) -> u8 {
+    let res = (res >> 8) as u16;
+
+    (res > 0x00ff) as u8
 }
