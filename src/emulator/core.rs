@@ -1,10 +1,17 @@
+extern crate spc;
+
 use super::ram::*;
 use super::instruction::Instruction;
-use super::instruction::Addressing;
 use super::instruction::Opcode;
 use super::register::*;
 use super::execution::*;
 use super::subject::Subject;
+use crate::dsp::DSP;
+use crate::emulator::timer::Timer;
+
+use std::io::Result;
+use std::path::Path;
+use spc::spc::Spc;
 
 trait BinOp<T> {
     fn binop(&mut self, inst: &Instruction, op: impl Fn(T, T) -> (T, Flag)) -> Flag;
@@ -94,7 +101,7 @@ trait StackManipulation<T> {
 impl StackManipulation<u8> for Spc700 {
     fn pop(&mut self) -> u8 {
         let addr = 0x0100 | (self.reg.sp.wrapping_add(1) as u16);
-        let byte = self.ram.read(addr);
+        let byte = self.read_ram(addr);
 
         self.reg.sp = self.reg.sp.wrapping_add(1);
 
@@ -103,7 +110,7 @@ impl StackManipulation<u8> for Spc700 {
 
     fn push(&mut self, data: u8) {
         let addr = 0x0100 | (self.reg.sp as u16);
-        self.ram.write(addr, data);
+        self.write_ram(addr, data);
 
         self.reg.sp = self.reg.sp.wrapping_sub(1);
     }
@@ -113,8 +120,8 @@ impl StackManipulation<u16> for Spc700 {
     fn pop(&mut self) -> u16 {
         let addr_for_lsb = 0x0100 | (self.reg.sp.wrapping_add(1) as u16);
         let addr_for_msb = 0x0100 | (self.reg.sp.wrapping_add(2) as u16);
-        let word_lsb = self.ram.read(addr_for_lsb) as u16;
-        let word_msb = self.ram.read(addr_for_msb) as u16;
+        let word_lsb = self.read_ram(addr_for_lsb) as u16;
+        let word_msb = self.read_ram(addr_for_msb) as u16;
 
         self.reg.sp =self.reg.sp.wrapping_add(2);
 
@@ -125,7 +132,7 @@ impl StackManipulation<u16> for Spc700 {
         for i in (0..2).rev() {
             let addr = 0x0100 | (self.reg.sp as u16);
             let byte = ((data >> (i * 8)) & 0xff) as u8;
-            self.ram.write(addr, byte);
+            self.write_ram(addr, byte);
             self.reg.sp = self.reg.sp.wrapping_sub(1);
         }
     }
@@ -134,23 +141,52 @@ impl StackManipulation<u16> for Spc700 {
 pub struct Spc700 {
     pub reg: Register,
     pub ram: Ram,
+    pub dsp: DSP,
+    pub timer: [Timer; 3],
+    cycle_counter: u64,
 }
 
 impl Spc700 {
+    pub fn new_with_init<P: AsRef<Path>>(path: P) -> Result<Spc700> {
+        let spc = Spc::load(path)?;
+        let ram = Ram::new_with_init(&spc.ram, &spc.ipl_rom);
+        let dsp = DSP::new_with_init(&spc.regs);
+        let mut timer = [8000, 8000, 64000].iter().map(|&hz| Timer::new(hz)).collect::<Vec<Timer>>();
+        let control = spc.ram[0x00F1]; 
+        timer.iter_mut().zip(0..3).for_each(|(timer, idx)| {
+            let enable = (control & (1 << idx)) > 0;
+            if enable {
+                timer.enable();
+            }
+        });
+        let register = Register::new_with_init(&spc);
+        
+        Ok(Spc700 {
+            reg: register,
+            ram: ram,
+            dsp: dsp,
+            timer: [timer[0], timer[1], timer[2]],
+            cycle_counter: 0,
+        })
+    }
+
     pub fn new(init_pc: u16) -> Spc700 {
         Spc700 {
             reg: Register::new(init_pc),
             ram: Ram::new(),
+            dsp: DSP::new(),
+            timer: [Timer::new(8000), Timer::new(8000), Timer::new(64000)],
+            cycle_counter: 0,
         }
     }
 
-    pub fn execute(&mut self) -> u64 {
+    pub fn clock(&mut self) -> u64 {
         let pc = self.reg.inc_pc(1);
-        let opcode = self.ram.read(pc);
+        let opcode = self.read_ram(pc);
         let mut inst = Instruction::decode(opcode);
 
-        println!("pc:{:#06x}, opcode:{:#04x}, a:{:#04x}, x:{:#04x}, y:{:#04x}, sp:{:#04x}, psw:{:#04x}",
-                 pc, opcode, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());
+        // println!("pc:{:#06x}, opcode:{:#04x}, a:{:#04x}, x:{:#04x}, y:{:#04x}, sp:{:#04x}, psw:{:#04x}",
+        //          pc, opcode, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());
         
         let flag = match inst.opcode {
             Opcode::MOV => { self.exec_mov(&inst) }
@@ -221,9 +257,14 @@ impl Spc700 {
             Opcode::DI => { self.di() }
         };
 
-        self.renew_psw(flag);
+        self.renew_psw(flag); 
+        self.timer.iter_mut().for_each(|timer| timer.clock());        
+        self.cycle_counter += inst.cycle;
 
-        // println!("pc: {:#06x}, inst: {:#?}", pc, inst.opcode);
+        if self.cycle_counter >= 64 {
+            self.dsp.flush(&mut self.ram);
+            self.cycle_counter = 0;
+        };
 
         inst.cycle
     }
@@ -280,7 +321,7 @@ impl Spc700 {
         let pwd = match op0_sub {
             Subject::Addr(addr, _) if (inst.raw_op != 0xFA) && (inst.raw_op != 0xAF) => {
                 if (inst.raw_op != 0xFA) && (inst.raw_op != 0xAF) {
-                    self.ram.read(addr);
+                    self.read_ram(addr);
                 }
 
                 (0x00, 0x00)
@@ -307,7 +348,7 @@ impl Spc700 {
 
         let pwd = match op0_sub {
             Subject::Addr(addr, _) => {
-                self.ram.read(addr);
+                self.read_ram(addr);
                 (0x00, 0x00)
             }
             _ => { pwd }
@@ -330,7 +371,7 @@ impl Spc700 {
 
     fn exec_pop(&mut self, inst: &Instruction) -> Flag {
         let (subject, inc) = Subject::new(self, inst.op0, inst.raw_op, false);
-        let data = subject.read(self);
+        let _ = subject.read(self);
         self.reg.inc_pc(inc);
 
         let data:u8 = self.pop();
@@ -387,7 +428,7 @@ impl Spc700 {
         self.reg.inc_pc(inc);
 
         let rr = if (rr & 0x80) > 0 {
-            (rr | 0xff00)
+            rr | 0xff00
         } else {
             rr
         };
@@ -440,8 +481,8 @@ impl Spc700 {
         let n = (((inst.raw_op >> 4) & 0x0f) << 1) as u16;
         self.push(self.reg.pc);
 
-        let lsb =self.ram.read(0xffde - n) as u16;
-        let msb = self.ram.read(0xffde - n + 1) as u16;
+        let lsb =self.read_ram(0xffde - n) as u16;
+        let msb = self.read_ram(0xffde - n + 1) as u16;
         self.reg.pc = msb << 8 | lsb;
 
         (0x00, 0x00)
@@ -480,8 +521,8 @@ impl Spc700 {
         self.push(self.reg.pc);
         self.push(self.reg.psw.get());
 
-        let pc_lsb = self.ram.read(0xffde) as u16;
-        let pc_msb = self.ram.read(0xffdf) as u16;
+        let pc_lsb = self.read_ram(0xffde) as u16;
+        let pc_msb = self.read_ram(0xffdf) as u16;
         self.reg.pc = (pc_msb << 8) | pc_lsb;
 
         self.reg.psw.assert_brk();
@@ -508,5 +549,13 @@ impl Spc700 {
     fn di(&mut self) -> Flag {
         self.reg.psw.negate_interrupt();
         (0x00, 0x00)
+    }
+
+    pub fn read_ram(&mut self, addr: u16) -> u8 {
+        self.ram.read(addr, &self.dsp, &mut self.timer)
+    }
+
+    pub fn write_ram(&mut self, addr: u16, data: u8) -> () {
+        self.ram.write(addr, data, &mut self.dsp, &mut self.timer)
     }
 }

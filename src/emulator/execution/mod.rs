@@ -5,7 +5,6 @@ pub mod sixteen_alu;
 pub mod one_alu;
 pub mod special;
 pub mod condjump;
-pub mod jump;
 
 pub type Flag = (u8, u8); // (Flag from execution, mask of Flag)
 

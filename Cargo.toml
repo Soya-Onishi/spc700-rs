@@ -5,3 +5,5 @@ authors = ["soya <ohnishi.soya@arc.cs.okayama-u.ac.jp>"]
 edition = "2018"
 
 [dependencies]
+
+spc = "0.1.1"

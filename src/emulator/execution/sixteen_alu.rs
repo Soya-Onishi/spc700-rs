@@ -139,20 +139,6 @@ fn is_sign(res: u16) -> u8 {
     ((res & 0x8000) >> 8) as u8
 }
 
-fn is_overflow(op0: u16, op1: u16, res: u16) -> u8 {
-    let flag = (!(op0 ^ op1) & (op0 ^ res) & 0x8000) > 1;
-    (flag as u8) << 6
-}
-
-fn is_half(op0: u16, op1: u16, res: u16) -> u8 {
-    let op0 = (op0 >> 8) as u8;
-    let op1 = (op1 >> 8) as u8;
-    let res = (res >> 8) as u8;
-
-    let flag = ((op0 ^ op1 ^ res) & 0x10) > 1;
-    (flag as u8) << 3
-}
-
 fn is_zero(res: u16) -> u8 {
     let flag = res == 0;
     (flag as u8) << 1

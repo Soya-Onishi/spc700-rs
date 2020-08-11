@@ -24,6 +24,19 @@ impl Flags {
         }
     }
 
+    pub fn new_with_init(psw: u8) -> Flags {
+        Flags {
+            n: (psw & 0x80) > 0,
+            v: (psw & 0x40) > 0,
+            p: (psw & 0x20) > 0,
+            b: (psw & 0x10) > 0,
+            h: (psw & 0x08) > 0,
+            i: (psw & 0x04) > 0,
+            z: (psw & 0x02) > 0,
+            c: (psw & 0x01) > 0,
+        }
+    }
+
     pub fn assert_sign(&mut self) { self.n = true; }
     pub fn negate_sign(&mut self) { self.n = false; }
     pub fn set_sign(&mut self, flag: bool) { self.n = flag; }

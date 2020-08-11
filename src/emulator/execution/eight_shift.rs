@@ -3,7 +3,7 @@ use super::*;
 pub type RetType = (u8, Flag);
 
 pub fn asl((op0, carry_flag): (u8, bool)) -> RetType {
-    let shifter = |op, carry| -> u8 {
+    let shifter = |op, _carry| -> u8 {
         op << 1
     };
     let is_carry = |op| -> bool {
@@ -26,7 +26,7 @@ pub fn rol((op0, carry_flag): (u8, bool)) -> RetType {
 }
 
 pub fn lsr((op0, carry_flag): (u8, bool)) -> RetType {
-    let shifter = |op, carry| {
+    let shifter = |op, _carry| {
         (op >> 1) & (0x7f as u8)
     };
     let is_carry = |op| -> bool {
@@ -37,7 +37,7 @@ pub fn lsr((op0, carry_flag): (u8, bool)) -> RetType {
 }
 
 pub fn ror((op0, carry_flag): (u8, bool)) -> RetType {
-    let shifter = |op, carry| -> u8 {
+    let shifter = |_op, carry| -> u8 {
         let c = if carry { 0x80 } else { 0 };
         c | ((op0 >> 1) & 0x7f)
     };

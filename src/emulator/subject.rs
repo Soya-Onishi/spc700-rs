@@ -1,5 +1,4 @@
 use super::core::Spc700;
-use super::Instruction;
 use super::instruction::Addressing;
 use super::instruction::PSWBit;
 
@@ -29,8 +28,8 @@ impl Subject {
         fn word_address(spc: &mut Spc700) -> u16 {
             let lsb_addr = spc.reg.pc;
             let msb_addr = spc.reg.pc.wrapping_add(1);
-            let lsb = spc.ram.read(lsb_addr) as u16;
-            let msb = spc.ram.read(msb_addr) as u16;
+            let lsb = spc.read_ram(lsb_addr) as u16;
+            let msb = spc.read_ram(msb_addr) as u16;
 
             (msb << 8) | lsb
         }
@@ -61,18 +60,18 @@ impl Subject {
                 (Subject::PSW(psw_bit), 0)
             }
             Addressing::Abs => {
-                let abs = spc.ram.read(spc.reg.pc);
+                let abs = spc.read_ram(spc.reg.pc);
                 let addr = set_msb(abs, spc);
                 (Subject::Addr(addr, word_access), 1)
             }
             Addressing::AbsX => {
-                let abs = spc.ram.read(spc.reg.pc);
+                let abs = spc.read_ram(spc.reg.pc);
                 let addr = set_msb(abs.wrapping_add(spc.reg.x), spc);
 
                 (Subject::Addr(addr, word_access), 1)
             }
             Addressing::AbsY => {
-                let abs = spc.ram.read(spc.reg.pc);
+                let abs = spc.read_ram(spc.reg.pc);
                 let addr = set_msb(abs.wrapping_add(spc.reg.y), spc);
 
                 (Subject::Addr(addr, word_access), 1)
@@ -99,27 +98,25 @@ impl Subject {
                 (Subject::Addr(addr, word_access), 2)
             }
             Addressing::IndAbsX => {
-                let ind = spc.ram.read(spc.reg.pc);
+                let ind = spc.read_ram(spc.reg.pc);
                 let ind_x = ind.wrapping_add(spc.reg.x);
-                let abs_lsb = spc.ram.read(set_msb(ind_x, spc)) as u16;
-                let abs_msb = spc.ram.read(set_msb(ind_x.wrapping_add(1), spc)) as u16;
+                let abs_lsb = spc.read_ram(set_msb(ind_x, spc)) as u16;
+                let abs_msb = spc.read_ram(set_msb(ind_x.wrapping_add(1), spc)) as u16;
                 let addr = (abs_msb << 8) | abs_lsb;
 
                 (Subject::Addr(addr, word_access), 1)
             }
             Addressing::IndAbsY => {
-                let ind_addr = spc.ram.read(spc.reg.pc);
-                let abs_lsb = spc.ram.read(set_msb(ind_addr, spc)) as u16;
-                let abs_msb = spc.ram.read(set_msb(ind_addr.wrapping_add(1), spc)) as u16;
+                let ind_addr = spc.read_ram(spc.reg.pc);
+                let abs_lsb = spc.read_ram(set_msb(ind_addr, spc)) as u16;
+                let abs_msb = spc.read_ram(set_msb(ind_addr.wrapping_add(1), spc)) as u16;
                 let abs = (abs_msb << 8) | abs_lsb;
                 let addr = abs.wrapping_add(spc.reg.y as u16);
 
                 (Subject::Addr(addr, word_access), 1)
             }
             Addressing::AbsB => {
-                let abs = spc.ram.read(spc.reg.pc) as u16;
-                // let abs = set_msb(abs, spc);
-
+                let abs = spc.read_ram(spc.reg.pc) as u16;            
                 let bit = raw_op >> 5;
 
                 (Subject::Bit(abs, bit), 1)
@@ -139,10 +136,10 @@ impl Subject {
     pub fn read(self, spc: &mut Spc700) -> u16 {
         match self {
             Subject::Addr(addr, is_word) => {
-                let lsb = spc.ram.read(addr) as u16;
+                let lsb = spc.read_ram(addr) as u16;
                 let msb =
                     if is_word {
-                        spc.ram.read(addr.wrapping_add(1)) as u16
+                        spc.read_ram(addr.wrapping_add(1)) as u16
                     } else {
                         0
                     };
@@ -150,7 +147,7 @@ impl Subject {
                 msb << 8 | lsb
             }
             Subject::Bit(addr, bit) => {
-                let byte = spc.ram.read(addr);
+                let byte = spc.read_ram(addr);
 
                 ((byte >> bit) & 1) as u16
             }
@@ -193,12 +190,12 @@ impl Subject {
     pub fn write(self, spc: &mut Spc700, data: u16) {
         match self {
             Subject::Addr(addr, is_word) => {
-                let lsb = data as u8;
-                spc.ram.write(addr, lsb);
+                let lsb = data as u8;                
+                spc.ram.write(addr, lsb, &mut spc.dsp, &mut spc.timer);
 
                 if is_word {
                     let msb = (data >> 8) as u8;
-                    spc.ram.write(addr.wrapping_add(1), msb);
+                    spc.write_ram(addr.wrapping_add(1), msb);
                 }
             }
             Subject::Bit(addr, bit_pos) => {
@@ -206,7 +203,7 @@ impl Subject {
                 let origin = origin & !(1 << bit_pos);
                 let data = (data as u8) << bit_pos;
 
-                spc.ram.write(addr, data | origin);
+                spc.write_ram(addr, data | origin);
             }
             Subject::A => {
                 if data == 0xef {

@@ -1,5 +1,3 @@
-use crate::spc::register::Flags;
-
 const MASK: u8 = 0b0000_0000;
 const FLAG: u8 = 0b0000_0000;
 const PSW_FLAG: super::Flag = (FLAG, MASK);

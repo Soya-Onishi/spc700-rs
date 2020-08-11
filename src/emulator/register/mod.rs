@@ -1,6 +1,9 @@
 mod flags;
 
+extern crate spc;
+
 pub use self::flags::Flags;
+use spc::spc::Spc;
 
 pub struct Register {
     pub a: u8,
@@ -20,6 +23,17 @@ impl Register {
             sp: 0xef,
             psw: Flags::new(),
             pc: init_pc,
+        }
+    }
+
+    pub fn new_with_init(spc: &Spc) -> Register {
+        Register {
+            a: spc.a,
+            x: spc.x,
+            y: spc.y,
+            sp: spc.y,
+            psw: Flags::new_with_init(spc.psw),
+            pc: spc.pc,
         }
     }
 

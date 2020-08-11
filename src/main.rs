@@ -1,12 +1,12 @@
-mod spc;
+pub mod emulator;
+pub mod dsp;
 
 use std::env;
-use std::collections::HashMap;
-use spc::core::Spc700;
+use emulator::core::Spc700;
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let mut core = spc::core::Spc700::new(0x0430);
+    let mut core = emulator::core::Spc700::new(0x0430);
 
     if args.len() == 4 {
         let start_pos = u16::from_str_radix(&args[2], 16).unwrap();
@@ -15,13 +15,13 @@ fn main() {
     }
 
     while core.ram.ram[0x8000] == 0 {
-        core.execute();
+        core.clock();
 
         print_log(&mut core);
     }
 
     while core.ram.ram[0x8000] == 0x80 {
-        core.execute();
+        core.clock();
 
         print_log(&mut core);
     }
