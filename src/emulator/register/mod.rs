@@ -31,7 +31,7 @@ impl Register {
             a: spc.a,
             x: spc.x,
             y: spc.y,
-            sp: spc.y,
+            sp: spc.sp,
             psw: Flags::new_with_init(spc.psw),
             pc: spc.pc,
         }

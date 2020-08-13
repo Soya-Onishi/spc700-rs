@@ -27,7 +27,7 @@ NONE,      // The opcode is not separted by addressing
 }
  */
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum PSWBit {
     N,
     V,
@@ -39,7 +39,7 @@ pub enum PSWBit {
     ALL,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum Addressing {
     None,
     Imm,

@@ -105,7 +105,7 @@ impl Ram {
         }
     }
 
-    pub fn read(&mut self, addr: u16, dsp: &DSP, timer: &mut [Timer; 3]) -> u8 {
+    pub fn read(&mut self, addr: u16, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {
         match addr {
             0x0000..=0x00EF => self.ram[addr as usize],         // RAM (typically used for CPU pointers/variables)
             0x00F0..=0x00FF => self.read_from_io(addr as usize, dsp, timer),  // I/O Ports (writes are also passed to RAM)
@@ -121,12 +121,12 @@ impl Ram {
         }
     }
 
-    fn read_from_io(&mut self, addr: usize, dsp: &DSP, timer: &mut [Timer; 3]) -> u8 {
+    fn read_from_io(&mut self, addr: usize, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {
         match addr {
-            0x00F0 => self.ram[addr], // test is write only
-            0x00F1 => self.ram[addr], // control is write only
+            0x00F0 => 0, // self.ram[addr], // test is write only
+            0x00F1 => 0, // self.ram[addr], // control is write only
             0x00F2 => self.dsp_addr,
-            0x00F3 => dsp.read_from_register(self.dsp_addr as usize),
+            0x00F3 => dsp.read_from_register(self.dsp_addr as usize, self),
             0x00F4..=0x00F7 => 0,     // return 0 (write to CPUIO for S-CPU(nor main CPU), but this is not functional for this emulator)
             0x00F8 => self.ram[addr],
             0x00F9 => self.ram[addr],
@@ -149,17 +149,7 @@ impl Ram {
                 if self.rom_writable { 
                     self.ram[addr as usize] = data;
                 }
-        };
-
-        if addr == 0x0813 {
-            let mut sum: u32 = 0;
-            for i in 0..self.ram.len() {
-                sum = sum.wrapping_add(self.ram[i] as u32);
-            }
-            // println!("sum({:#04x}): 0x{:#010x}", self.ram[0x813], sum);
-        }
-
-        self.ram[addr as usize] = data;        
+        };     
     }
 
     fn write_to_io(&mut self, addr: usize, data: u8, dsp: &mut DSP, timer: &mut [Timer; 3]) -> () {
@@ -167,7 +157,7 @@ impl Ram {
             0x00F0 => self.write_to_test(data),
             0x00F1 => self.write_to_control(data, timer), 
             0x00F2 => self.dsp_addr = data,
-            0x00F3 => dsp.write_to_register(self.dsp_addr as usize, data),
+            0x00F3 => dsp.write_to_register(self.dsp_addr as usize, data, self),            
             0x00F4..=0x00F7 => (), // nothing to do (write to CPUIO for S-CPU(nor main CPU), but this is not functional for this emulator)
             0x00F8 => self.ram[addr] = data, // each AUXIO has no functionality
             0x00F9 => self.ram[addr] = data,

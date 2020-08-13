@@ -5,6 +5,7 @@ use super::instruction::PSWBit;
 #[derive(Copy, Clone)]
 pub enum Subject {
     Addr(u16, bool),
+    Imm(u8),
     Bit(u16, u8),
     A,
     X,
@@ -17,7 +18,7 @@ pub enum Subject {
 
 impl Subject {
     // one of return values, u16, means pc incremental value
-    pub fn new(spc: &mut Spc700, addressing: Addressing, raw_op: u8, word_access: bool) -> (Subject, u16) {
+    pub fn new(spc: &mut Spc700, addressing: Addressing, raw_op: u8, word_access: bool, enable_cycle: bool) -> (Subject, u16) {
         fn set_msb(lsb: u8, spc: &Spc700) -> u16 {
             let lsb = lsb as u16;
             let msb = if spc.reg.psw.page() { 0x0100 } else { 0 };
@@ -39,7 +40,8 @@ impl Subject {
                 (Subject::None, 0)
             }
             Addressing::Imm => {
-                (Subject::Addr(spc.reg.pc, word_access), 1)
+                let imm = spc.read_ram(spc.reg.pc);
+                (Subject::Imm(imm), 1)
             }
             Addressing::A => {
                 (Subject::A, 0)
@@ -65,13 +67,13 @@ impl Subject {
                 (Subject::Addr(addr, word_access), 1)
             }
             Addressing::AbsX => {
-                let abs = spc.read_ram(spc.reg.pc);
+                let abs = spc.read_ram(spc.reg.pc);                
                 let addr = set_msb(abs.wrapping_add(spc.reg.x), spc);
 
                 (Subject::Addr(addr, word_access), 1)
             }
             Addressing::AbsY => {
-                let abs = spc.read_ram(spc.reg.pc);
+                let abs = spc.read_ram(spc.reg.pc);                
                 let addr = set_msb(abs.wrapping_add(spc.reg.y), spc);
 
                 (Subject::Addr(addr, word_access), 1)
@@ -86,7 +88,7 @@ impl Subject {
                 (Subject::Addr(word_address(spc), word_access), 2)
             }
             Addressing::Abs16X => {
-                let abs = word_address(spc);
+                let abs = word_address(spc);                
                 let addr = abs.wrapping_add(spc.reg.x as u16);
 
                 (Subject::Addr(addr, word_access), 2)
@@ -146,6 +148,7 @@ impl Subject {
 
                 msb << 8 | lsb
             }
+            Subject::Imm(imm) => imm as u16,
             Subject::Bit(addr, bit) => {
                 let byte = spc.read_ram(addr);
 
@@ -191,13 +194,14 @@ impl Subject {
         match self {
             Subject::Addr(addr, is_word) => {
                 let lsb = data as u8;                
-                spc.ram.write(addr, lsb, &mut spc.dsp, &mut spc.timer);
+                spc.write_ram(addr, lsb);
 
                 if is_word {
                     let msb = (data >> 8) as u8;
                     spc.write_ram(addr.wrapping_add(1), msb);
                 }
             }
+            Subject::Imm(_) => (),
             Subject::Bit(addr, bit_pos) => {
                 let origin = spc.ram.ram[addr as usize];
                 let origin = origin & !(1 << bit_pos);
@@ -205,20 +209,20 @@ impl Subject {
 
                 spc.write_ram(addr, data | origin);
             }
-            Subject::A => {
-                if data == 0xef {
-                    // println!("0xef written");
-                }
-
+            Subject::A => {         
+                // spc.cycles(1);          
                 spc.reg.a = data as u8;
             }
             Subject::X => {
+                // spc.cycles(1);   
                 spc.reg.x = data as u8;
             }
             Subject::Y => {
+                // spc.cycles(1);   
                 spc.reg.y = data as u8;
             }
             Subject::YA => {
+                spc.cycles(1);
                 let y = (data >> 8) as u8;
                 let a = (data & 0x00ff) as u8;
 
@@ -226,9 +230,11 @@ impl Subject {
                 spc.reg.a = a;
             }
             Subject::SP => {
+                // spc.cycles(1);
                 spc.reg.sp = data as u8;
             }
             Subject::PSW(bit) => {
+                // spc.cycles(1);
                 match bit {
                     PSWBit::ALL => { spc.reg.psw.set(data as u8) }
                     PSWBit::B => { spc.reg.psw.set_brk(data & 1 > 0)}

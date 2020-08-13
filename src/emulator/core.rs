@@ -23,6 +23,7 @@ impl BinOp<u8> for Spc700 {
         self.reg.inc_pc(incl);
         let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false);
         self.reg.inc_pc(incl);
+        self.cycles(1);
 
         let op0 = op0_sub.read(self);
         let mut op1 = op1_sub.read(self);
@@ -35,8 +36,18 @@ impl BinOp<u8> for Spc700 {
 
         let (res, pwd) = op(op0 as u8, op1 as u8);
 
+        // additional cycles in special case 
+        match inst.opcode {
+            Opcode::CMP => self.cycles(1),
+            Opcode::TCLR1 => self.cycles(1),
+            Opcode::TSET1 => self.cycles(1),
+            _ => (),
+        }
+
         if inst.opcode != Opcode::CMP {
             op0_sub.write(self, res as u16);
+        } else {
+            self.cycles(1);
         }
         
         pwd
@@ -49,6 +60,7 @@ impl BinOp<u16> for Spc700 {
         self.reg.inc_pc(incl);
         let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, true);
         self.reg.inc_pc(incl);
+        self.cycles(1);
 
         let op0 = op0_sub.read(self);
         let op1 = op1_sub.read(self);
@@ -70,6 +82,12 @@ impl UnaryOp<u8> for Spc700 {
         self.reg.inc_pc(incl);
 
         let op0 = op0_sub.read(self);
+
+        // additional cycle in special case
+        match inst.opcode {
+            Opcode::XCN => self.cycles(4),
+            _ => (),
+        }
 
         let (res, psw) = op(op0 as u8);
         op0_sub.write(self, res as u16);
@@ -143,7 +161,7 @@ pub struct Spc700 {
     pub ram: Ram,
     pub dsp: DSP,
     pub timer: [Timer; 3],
-    cycle_counter: u64,
+    pub cycle_counter: u64,
 }
 
 impl Spc700 {
@@ -165,7 +183,7 @@ impl Spc700 {
             reg: register,
             ram: ram,
             dsp: dsp,
-            timer: [timer[0], timer[1], timer[2]],
+            timer: [timer[0], timer[1], timer[2]],            
             cycle_counter: 0,
         })
     }
@@ -175,18 +193,34 @@ impl Spc700 {
             reg: Register::new(init_pc),
             ram: Ram::new(),
             dsp: DSP::new(),
-            timer: [Timer::new(8000), Timer::new(8000), Timer::new(64000)],
+            timer: [Timer::new(8000), Timer::new(8000), Timer::new(64000)],            
             cycle_counter: 0,
         }
     }
 
-    pub fn clock(&mut self) -> u64 {
+    pub fn next_sample(&mut self) -> (u16, u16) {
+        let mut before_cycle = self.cycle_counter;
+
+        while (self.cycle_counter - before_cycle) < 64 {
+            self.clock();
+        }
+
+        (self.dsp.sample_left_out(), self.dsp.sample_right_out())
+    }
+
+    fn clock(&mut self) -> () {
+        static mut ALL_CYCLE: u64 = 0;
+        let before_cycle = self.cycle_counter;
+
         let pc = self.reg.inc_pc(1);
         let opcode = self.read_ram(pc);
         let mut inst = Instruction::decode(opcode);
 
-        // println!("pc:{:#06x}, opcode:{:#04x}, a:{:#04x}, x:{:#04x}, y:{:#04x}, sp:{:#04x}, psw:{:#04x}",
-        //          pc, opcode, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());
+        unsafe {
+            // println!("[{:#08x}] opcode: {:#04x}, pc: {:#06x}, a: {:#04x}, x: {:#04x}, y: {:#04x}, sp: {:#04x}, psw: {:#010b}", ALL_CYCLE, opcode, pc, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());            
+            let timer = &self.timer[0];
+            // println!("enable: {}, cycle: {:#06x}, out: {:#03x}, divided: {:#06x}", timer.enable, timer.cycle_counter, timer.out, timer.divided)
+        }            
         
         let flag = match inst.opcode {
             Opcode::MOV => { self.exec_mov(&inst) }
@@ -248,7 +282,7 @@ impl Spc700 {
             Opcode::RET => { self.ret() }
             Opcode::RETI => { self.ret1() }
             Opcode::BRK => { self.brk() }
-            Opcode::NOP => { (0x00, 0x00) /* nothing to do */ }
+            Opcode::NOP => { self.cycles(1); (0x00, 0x00) /* nothing to do */ }
             Opcode::SLEEP => { panic!("SPC700 is suspended by SLEEP") }
             Opcode::STOP => { panic!("SPC700 is suspended by STOP") }
             Opcode::CLRP => { self.clrp() }
@@ -258,15 +292,11 @@ impl Spc700 {
         };
 
         self.renew_psw(flag); 
-        self.timer.iter_mut().for_each(|timer| timer.clock());        
-        self.cycle_counter += inst.cycle;
-
-        if self.cycle_counter >= 64 {
-            self.dsp.flush(&mut self.ram);
-            self.cycle_counter = 0;
-        };
-
-        inst.cycle
+        self.dsp.flush(&mut self.ram);  // flush in force        
+        assert_eq!(inst.cycles, (self.cycle_counter - before_cycle) as u16, "{:?}[{:#04x}], {:?}, {:?}", inst.opcode, inst.raw_op, inst.op0, inst.op1);
+        unsafe {
+            ALL_CYCLE += self.cycle_counter - before_cycle;
+        }    
     }
 
     fn renew_psw(&mut self, (flag, mask): Flag) {
@@ -283,7 +313,8 @@ impl Spc700 {
         let (op0_sub, inc) = Subject::new(self, inst.op0, inst.raw_op, false);
         let op0 = op0_sub.read(self);
         self.reg.inc_pc(inc);
-
+               
+        self.cycles(1);
         let (res, psw) = op(op0 as u8, self.reg.psw.half(), self.reg.psw.carry());
         op0_sub.write(self, res as u16);
 
@@ -310,9 +341,10 @@ impl Spc700 {
 
     fn exec_mov(&mut self, inst: &Instruction) -> Flag {
         let (op1_sub, incl) = Subject::new(self, inst.op1, inst.raw_op, false);
-        self.reg.inc_pc(incl);
+        self.reg.inc_pc(incl);        
         let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false);
-        self.reg.inc_pc(incl);
+        self.reg.inc_pc(incl);      
+        self.cycles(1)  
 
         let op1 = op1_sub.read(self) as u8;
         
@@ -392,9 +424,11 @@ impl Spc700 {
 
         let (bias, is_branch) = match inst.opcode {
             Opcode::CBNE => {
-                condjump::cbne(op0 as u8, self.reg.a, rr as u8)
+                self.cycles(1); condjump::cbne(op0 as u8, self.reg.a, rr as u8)
             }
             Opcode::DBNZ => {
+                self.cycles(1);
+
                 let byte = op0.wrapping_sub(1);
                 let (bias, is_branch) = condjump::dbnz(byte as u8, rr as u8);
 
@@ -403,20 +437,20 @@ impl Spc700 {
                 (bias, is_branch)
             }
             Opcode::BBS => {
-                condjump::branch(op0 as u8, rr as u8, true)
+                self.cycles(1); condjump::branch(op0 as u8, rr as u8, true)
             }
             Opcode::BBC => {
-                condjump::branch(op0 as u8, rr as u8, false)
+                self.cycles(1); condjump::branch(op0 as u8, rr as u8, false)
             }
             _ => {
-                condjump::branch(op0 as u8, rr as u8, inst.raw_op & 0x20 > 0)
+                condjump::branch(op0 as u8, rr as u8, (inst.raw_op & 0x20) > 0)
             }
         };
 
         self.reg.pc = self.reg.pc.wrapping_add(bias);
 
         if is_branch {
-            inst.cycle += 2;
+            self.cycles(2);
         }
 
         (0x00, 0x00)
@@ -483,6 +517,11 @@ impl Spc700 {
 
         let lsb =self.read_ram(0xffde - n) as u16;
         let msb = self.read_ram(0xffde - n + 1) as u16;
+        
+        self.cycles(3);
+        let current_pc = self.reg.pc;
+        self.push(current_pc);
+
         self.reg.pc = msb << 8 | lsb;
 
         (0x00, 0x00)
@@ -518,13 +557,15 @@ impl Spc700 {
     }
 
     fn brk(&mut self) -> Flag {
-        self.push(self.reg.pc);
-        self.push(self.reg.psw.get());
-
         let pc_lsb = self.read_ram(0xffde) as u16;
         let pc_msb = self.read_ram(0xffdf) as u16;
-        self.reg.pc = (pc_msb << 8) | pc_lsb;
+        let next_pc = (pc_msb << 8) | pc_lsb;
 
+        self.cycles(2);
+        self.push(self.reg.pc);
+        self.push(self.reg.psw.get());        
+
+        self.reg.pc = next_pc;
         self.reg.psw.assert_brk();
         self.reg.psw.negate_interrupt();
 
@@ -552,10 +593,25 @@ impl Spc700 {
     }
 
     pub fn read_ram(&mut self, addr: u16) -> u8 {
-        self.ram.read(addr, &self.dsp, &mut self.timer)
+        self.cycles(1);
+        self.read_ram_without_cycle(addr)
+    }
+
+    pub fn read_ram_without_cycle(&mut self, addr: u16) -> u8 {
+        let data = self.ram.read(addr, &mut self.dsp, &mut self.timer);
+        // println!("[ read ram] addr: {:#06x}, data: {:#04x}", addr, data);
+        data
     }
 
     pub fn write_ram(&mut self, addr: u16, data: u8) -> () {
-        self.ram.write(addr, data, &mut self.dsp, &mut self.timer)
+        self.cycles(1);
+        self.ram.write(addr, data, &mut self.dsp, &mut self.timer);
+        // println!("[write ram] addr: {:#06x}, data: {:#04x}", addr, data);
+    }
+
+    pub fn cycles(&mut self, cycle_count: u16) -> () {
+        self.dsp.cycles(cycle_count);
+        self.timer.iter_mut().for_each(|timer| timer.cycles(cycle_count));
+        self.cycle_counter += cycle_count as u64;
     }
 }

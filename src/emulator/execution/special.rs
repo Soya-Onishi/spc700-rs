@@ -2,7 +2,7 @@ use super::*;
 
 type RetType = (u8, Flag);
 
-pub fn daa(acc: u8, half_flag: bool, carry_flag: bool) -> RetType {
+pub fn daa(acc: u8, half_flag: bool, carry_flag: bool) -> RetType {    
     let (tmp, carry) =
         if (acc > 0x99) || carry_flag {
             (acc.wrapping_add(0x60), 0b0000_0001)

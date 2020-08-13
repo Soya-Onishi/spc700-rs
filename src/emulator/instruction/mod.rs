@@ -9,18 +9,18 @@ pub struct Instruction {
     pub opcode: Opcode,
     pub raw_op: u8,
     pub op0: Addressing,
-    pub op1: Addressing,
-    pub cycle: u64,
+    pub op1: Addressing,    
+    pub cycles: u16,
 }
 
 impl Instruction {
-    pub const fn new(raw_op: u8, opcode: Opcode, op0: Addressing, op1: Addressing, cycle: u64) -> Instruction {
+    pub const fn new(raw_op: u8, opcode: Opcode, op0: Addressing, op1: Addressing, cycle: u16) -> Instruction {
         Instruction {
             opcode,
             raw_op,
             op0,
-            op1,
-            cycle,
+            op1,   
+            cycles: cycle         
         }
     }
 
