@@ -2,10 +2,7 @@ extern crate spc;
 
 use super::ram::*;
 use super::instruction::Instruction;
-use super::instruction::Opcode;
 use super::register::*;
-use super::execution::*;
-use super::subject::Subject;
 use crate::dsp::DSP;
 use crate::emulator::timer::Timer;
 
@@ -13,155 +10,13 @@ use std::io::Result;
 use std::path::Path;
 use spc::spc::Spc;
 
-trait BinOp<T> {
-    fn binop(&mut self, inst: &Instruction, op: impl Fn(T, T) -> (T, Flag)) -> Flag;
-}
-
-impl BinOp<u8> for Spc700 {
-    fn binop(&mut self, inst: &Instruction, op: impl Fn(u8, u8) -> (u8, Flag)) -> Flag {
-        let (op1_sub, incl) = Subject::new(self, inst.op1, inst.raw_op,false);
-        self.reg.inc_pc(incl);
-        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false);
-        self.reg.inc_pc(incl);
-        self.cycles(1);
-
-        let op0 = op0_sub.read(self);
-        let mut op1 = op1_sub.read(self);
-
-        if inst.opcode == Opcode::AND1 || inst.opcode == Opcode::OR1 {
-            if inst.raw_op & 0x20 > 0 {
-               op1 = !op1;
-            }
-        }
-
-        let (res, pwd) = op(op0 as u8, op1 as u8);
-
-        // additional cycles in special case 
-        match inst.opcode {
-            Opcode::CMP => self.cycles(1),
-            Opcode::TCLR1 => self.cycles(1),
-            Opcode::TSET1 => self.cycles(1),
-            _ => (),
-        }
-
-        if inst.opcode != Opcode::CMP {
-            op0_sub.write(self, res as u16);
-        } else {
-            self.cycles(1);
-        }
-        
-        pwd
-    }
-}
-
-impl BinOp<u16> for Spc700 {
-    fn binop(&mut self, inst: &Instruction, op: impl Fn(u16, u16) -> (u16, Flag)) -> Flag {
-        let (op1_sub, incl) = Subject::new(self, inst.op1, inst.raw_op, true);
-        self.reg.inc_pc(incl);
-        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, true);
-        self.reg.inc_pc(incl);
-        self.cycles(1);
-
-        let op0 = op0_sub.read(self);
-        let op1 = op1_sub.read(self);
-
-        let (res, psw) = op(op0, op1);
-        op0_sub.write(self, res);
-
-        psw
-    }
-}
-
-trait UnaryOp<T> {
-    fn unaryop(&mut self, inst: &Instruction, op: impl Fn(T) -> (u8, Flag)) -> Flag;
-}
-
-impl UnaryOp<u8> for Spc700 {
-    fn unaryop(&mut self, inst: &Instruction, op: impl Fn(u8) -> (u8, Flag)) -> Flag {
-        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false);
-        self.reg.inc_pc(incl);
-
-        let op0 = op0_sub.read(self);
-
-        // additional cycle in special case
-        match inst.opcode {
-            Opcode::XCN => self.cycles(4),
-            _ => (),
-        }
-
-        let (res, psw) = op(op0 as u8);
-        op0_sub.write(self, res as u16);
-
-        psw
-    }
-}
-
-
-impl UnaryOp<(u8, bool)> for Spc700 {
-    fn unaryop(&mut self, inst: &Instruction, op: impl Fn((u8, bool)) -> (u8, Flag)) -> Flag {
-        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false);
-        self.reg.inc_pc(incl);
-
-        let op0 = op0_sub.read(self);
-
-        let (res, psw) = op((op0 as u8, self.reg.psw.carry()));
-        op0_sub.write(self, res as u16);
-
-        psw
-    }
-}
-
-trait StackManipulation<T> {
-    fn push(&mut self, data: T);
-    fn pop(&mut self) -> T;
-}
-
-impl StackManipulation<u8> for Spc700 {
-    fn pop(&mut self) -> u8 {
-        let addr = 0x0100 | (self.reg.sp.wrapping_add(1) as u16);
-        let byte = self.read_ram(addr);
-
-        self.reg.sp = self.reg.sp.wrapping_add(1);
-
-        byte
-    }
-
-    fn push(&mut self, data: u8) {
-        let addr = 0x0100 | (self.reg.sp as u16);
-        self.write_ram(addr, data);
-
-        self.reg.sp = self.reg.sp.wrapping_sub(1);
-    }
-}
-
-impl StackManipulation<u16> for Spc700 {
-    fn pop(&mut self) -> u16 {
-        let addr_for_lsb = 0x0100 | (self.reg.sp.wrapping_add(1) as u16);
-        let addr_for_msb = 0x0100 | (self.reg.sp.wrapping_add(2) as u16);
-        let word_lsb = self.read_ram(addr_for_lsb) as u16;
-        let word_msb = self.read_ram(addr_for_msb) as u16;
-
-        self.reg.sp =self.reg.sp.wrapping_add(2);
-
-        (word_msb << 8) | word_lsb
-    }
-
-    fn push(&mut self, data: u16) {
-        for i in (0..2).rev() {
-            let addr = 0x0100 | (self.reg.sp as u16);
-            let byte = ((data >> (i * 8)) & 0xff) as u8;
-            self.write_ram(addr, byte);
-            self.reg.sp = self.reg.sp.wrapping_sub(1);
-        }
-    }
-}
-
 pub struct Spc700 {
     pub reg: Register,
     pub ram: Ram,
     pub dsp: DSP,
     pub timer: [Timer; 3],
     pub cycle_counter: u64,
+    is_stopped: bool
 }
 
 impl Spc700 {
@@ -185,6 +40,7 @@ impl Spc700 {
             dsp: dsp,
             timer: [timer[0], timer[1], timer[2]],            
             cycle_counter: 0,
+            is_stopped: false,
         })
     }
 
@@ -195,11 +51,12 @@ impl Spc700 {
             dsp: DSP::new(),
             timer: [Timer::new(8000), Timer::new(8000), Timer::new(64000)],            
             cycle_counter: 0,
+            is_stopped: false,
         }
     }
 
-    pub fn next_sample(&mut self) -> (u16, u16) {
-        let mut before_cycle = self.cycle_counter;
+    pub fn next_sample(&mut self) -> (i16, i16) {
+        let before_cycle = self.cycle_counter;
 
         while (self.cycle_counter - before_cycle) < 64 {
             self.clock();
@@ -220,387 +77,1407 @@ impl Spc700 {
             // println!("[{:#08x}] opcode: {:#04x}, pc: {:#06x}, a: {:#04x}, x: {:#04x}, y: {:#04x}, sp: {:#04x}, psw: {:#010b}", ALL_CYCLE, opcode, pc, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());            
             let timer = &self.timer[0];
             // println!("enable: {}, cycle: {:#06x}, out: {:#03x}, divided: {:#06x}", timer.enable, timer.cycle_counter, timer.out, timer.divided)
-        }            
+        }
         
-        let flag = match inst.opcode {
-            Opcode::MOV => { self.exec_mov(&inst) }
-            Opcode::MOVW => { self.exec_movw(&inst) }
-            Opcode::PUSH => { self.exec_push(&inst) }
-            Opcode::POP => { self.exec_pop(&inst) }
-            Opcode::OR => { self.binop(&inst, eight_alu::or) }
-            Opcode::AND => { self.binop(&inst, eight_alu::and) }
-            Opcode::EOR => { self.binop(&inst, eight_alu::eor) }
-            Opcode::CMP => { self.binop(&inst, eight_alu::cmp) }
-            Opcode::ADC => { self.calc_with_carry(&inst, eight_alu::adc) }
-            Opcode::SBC => { self.calc_with_carry(&inst, eight_alu::sbc) }
-            Opcode::ASL => { self.unaryop(&inst, eight_shift::asl) }
-            Opcode::ROL => { self.unaryop(&inst, eight_shift::rol) }
-            Opcode::LSR => { self.unaryop(&inst, eight_shift::lsr) }
-            Opcode::ROR => { self.unaryop(&inst, eight_shift::ror) }
-            Opcode::INC => { self.unaryop(&inst, inclement::inc) }
-            Opcode::DEC => { self.unaryop(&inst, inclement::dec) }
-            Opcode::ADDW => { self.binop(&inst, sixteen_alu::addw) }
-            Opcode::SUBW => { self.binop(&inst, sixteen_alu::subw) }
-            Opcode::CMPW => { self.binop(&inst, sixteen_alu::cmpw) }
-            Opcode::INCW => { self.binop(&inst, sixteen_alu::incw) }
-            Opcode::DECW => { self.binop(&inst, sixteen_alu::decw) }
-            Opcode::DIV => { self.binop(&inst, sixteen_alu::div) }
-            Opcode::MUL => { self.binop(&inst, sixteen_alu::mul) }
-            Opcode::CLR1 => { self.binop(&inst, one_alu::clr1) }
-            Opcode::SET1 => { self.binop(&inst, one_alu::set1) }
-            Opcode::NOT1 => { self.binop(&inst, one_alu::not1) }
-            Opcode::MOV1 => { self.binop(&inst, one_alu::mov1) }
-            Opcode::OR1 => { self.binop(&inst, one_alu::or1) }
-            Opcode::AND1 => { self.binop(&inst, one_alu::and1) }
-            Opcode::EOR1 => { self.binop(&inst, one_alu::eor1) }
-            Opcode::CLRC => { self.binop(&inst, one_alu::clrc) }
-            Opcode::SETC => { self.binop(&inst, one_alu::setc) }
-            Opcode::NOTC => { self.binop(&inst, one_alu::notc) }
-            Opcode::CLRV => { self.binop(&inst, one_alu::clrv) }
-            Opcode::DAA => { self.trans_into_decimal(&inst, special::daa) }
-            Opcode::DAS => { self.trans_into_decimal(&inst, special::das) }
-            Opcode::XCN => { self.unaryop(&inst, special::xcn) }
-            Opcode::TCLR1 => { self.binop(&inst, special::tclr1) }
-            Opcode::TSET1 => { self.binop(&inst, special::tset1) }
-            Opcode::BPL => { self.branch(&mut inst) }
-            Opcode::BMI => { self.branch(&mut inst) }
-            Opcode::BVC => { self.branch(&mut inst) }
-            Opcode::BVS => { self.branch(&mut inst) }
-            Opcode::BCC => { self.branch(&mut inst) }
-            Opcode::BCS => { self.branch(&mut inst) }
-            Opcode::BNE => { self.branch(&mut inst) }
-            Opcode::BEQ => { self.branch(&mut inst) }
-            Opcode::BBS => { self.branch(&mut inst) }
-            Opcode::BBC => { self.branch(&mut inst) }
-            Opcode::CBNE => { self.branch(&mut inst) }
-            Opcode::DBNZ => { self.branch(&mut inst) }
-            Opcode::BRA => { self.relative_jump(&inst) }
-            Opcode::JMP => { self.absolute_jump(&inst) }
-            Opcode::CALL => { self.call(&inst) }
-            Opcode::TCALL => { self.tcall(&inst) }
-            Opcode::PCALL => { self.pcall(&inst) }
-            Opcode::RET => { self.ret() }
-            Opcode::RETI => { self.ret1() }
-            Opcode::BRK => { self.brk() }
-            Opcode::NOP => { self.cycles(1); (0x00, 0x00) /* nothing to do */ }
-            Opcode::SLEEP => { panic!("SPC700 is suspended by SLEEP") }
-            Opcode::STOP => { panic!("SPC700 is suspended by STOP") }
-            Opcode::CLRP => { self.clrp() }
-            Opcode::SETP => { self.setp() }
-            Opcode::EI => { self.ei() }
-            Opcode::DI => { self.di() }
+        let (upper, lower) = (opcode >> 4, opcode & 0xF);
+        let op_select = |upper: u8| {
+            match upper {
+                0x0 | 0x1 => or,
+                0x2 | 0x3 => and,
+                0x4 | 0x5 => eor,
+                0x6 | 0x7 => cmp,
+                0x8 | 0x9 => adc,
+                0xA | 0xB => sbc,
+                _ => panic!("upper must be between 0x0 to 0xB. actual {:#04x}", upper),
+            }
         };
+        let shift_select = |upper: u8| {
+            match upper {
+                0x0 | 0x1 => asl,
+                0x2 | 0x3 => rol,
+                0x4 | 0x5 => lsr,
+                0x6 | 0x7 => ror,
+                _ => panic!("upper expects to be between 0 to 7. actual: {:#04x}", upper),
+            }
+        };
+        
+        let is_cmp = |upper: u8| { upper == 0x6 || upper == 0x7 };
 
-        self.renew_psw(flag); 
-        self.dsp.flush(&mut self.ram);  // flush in force        
-        assert_eq!(inst.cycles, (self.cycle_counter - before_cycle) as u16, "{:?}[{:#04x}], {:?}, {:?}", inst.opcode, inst.raw_op, inst.op0, inst.op1);
+        match (upper, lower) {            
+            (  0x0, 0x0) => self.nop(),
+            (upper, 0x0) if upper % 2 == 1 => self.branch_by_psw(opcode),
+            (  0x2, 0x0) => self.clrp(),
+            (  0x4, 0x0) => self.setp(),
+            (  0x6, 0x0) => self.clrc(),
+            (  0x8, 0x0) => self.setc(),
+            (  0xA, 0x0) => self.ei(),
+            (  0xC, 0x0) => self.di(),
+            (  0xE, 0x0) => self.clrv(),
+            (    _, 0x1) => self.tcall(opcode),
+            (upper, 0x2) if upper % 2 == 0 => self.set1(opcode),
+            (    _, 0x2) => self.clr1(opcode),
+            (    _, 0x3) => self.branch_by_mem_bit(opcode),            
+            (upper, 0x4) if upper <= 0xB && upper % 2 == 0 => {
+                let op = op_select(upper);
+                self.alu_dp(0, op);
+            },
+            (upper, 0x4) if upper <= 0xB => {
+                let op = op_select(upper);
+                self.alu_x_idx_indirect(op);
+            },
+            (  0xC, 0x4) => self.mov_store_dp_reg(0),
+            (  0xD, 0x4) => self.mov_store_x_idx_indirect(0),
+            (  0xE, 0x4) => self.mov_load_dp(0),
+            (  0xF, 0x4) => self.mov_load_x_idx_indirect(0),
+            (upper, 0x5) if upper <= 0xB && upper % 2 == 0 => {
+                let op = op_select(upper);
+                self.alu_addr(0, op);
+            },
+            (upper, 0x5) if upper <= 0xB => {
+                let op = op_select(upper);
+                self.alu_x_idx_addr(op);
+            },
+            (  0xC, 0x5) => self.mov_store_addr(0),
+            (  0xD, 0x5) => self.mov_store_x_idx_addr(),
+            (  0xE, 0x5) => self.mov_load_addr(0),
+            (  0xF, 0x5) => self.mov_load_x_idx_addr(),
+            (upper, 0x6) if upper <= 0xB && upper % 2 == 0 => {
+                let op = op_select(upper);
+                self.alu_indirect_x(op);
+            },
+            (upper, 0x6) if upper <= 0xB => {
+                let op = op_select(upper);
+                self.alu_y_idx_addr(op);
+            },
+            (  0xC, 0x6) => self.mov_store_x_indirect(),
+            (  0xD, 0x6) => self.mov_store_y_idx_addr(),
+            (  0xE, 0x6) => self.mov_load_x_indirect(),
+            (  0xF, 0x6) => self.mov_load_y_idx_addr(),
+            (upper, 0x7) if upper <= 0xB && upper % 2 == 0 => {
+                let op = op_select(upper);
+                self.alu_x_ind_ind(op);
+            },
+            (upper, 0x7) if upper <= 0xB => {
+                let op = op_select(upper);
+                self.alu_y_ind_ind(op);
+            },
+            (  0xC, 0x7) => self.mov_store_x_ind_ind(),
+            (  0xD, 0x7) => self.mov_store_y_ind_ind(),
+            (  0xE, 0x7) => self.mov_load_x_ind_ind(),
+            (  0xF, 0x7) => self.mov_load_y_ind_ind(),
+            (upper, 0x8) if upper <= 0xB && upper % 2 == 0 => {
+                let op = op_select(upper);
+                self.alu_imm(0, op);
+            },
+            (upper, 0x8) if upper <= 0xB => {
+                let op = op_select(upper);
+                self.alu_dp_imm(is_cmp(upper), op);
+            },
+            (  0xC, 0x8) => self.alu_imm(1, cmp),
+            (  0xD, 0x8) => self.mov_store_dp_reg(1),
+            (  0xE, 0x8) => self.mov_reg_imm(0),
+            (  0xF, 0x8) => self.mov_load_dp(1),
+            (upper, 0x9) if upper <= 0xB && upper % 2 == 0 => {
+                let op = op_select(upper);
+                self.alu_dp_dp(is_cmp(upper), op);
+            },
+            (upper, 0x9) if upper <= 0xB => {
+                let op = op_select(upper);
+                self.alu_x_y(is_cmp(upper), op);
+            },
+            (  0xC, 0x9) => self.mov_store_addr(1),
+            (  0xD, 0x9) => self.mov_store_y_idx_indirect(),
+            (  0xE, 0x9) => self.mov_load_addr(1),
+            (  0xF, 0x9) => self.mov_load_y_idx_indirect(),
+            (upper, 0xA) if upper % 2 == 0 => {
+                match upper / 2 {
+                    0 | 1 => self.or1(opcode),
+                    2 | 3 => self.and1(opcode),
+                    4     => self.eor1(),
+                    5     => self.mov1_to_psw(),
+                    6     => self.mov1_to_mem(),
+                    7     => self.not1(),
+                    other => panic!("upper / 2 must be between 0 to 7, actual {:#04x}", other),
+                };
+            }
+            (  0x1, 0xA) => self.inc_dec_word(dec_word),
+            (  0x3, 0xA) => self.inc_dec_word(inc_word),
+            (  0x5, 0xA) => self.cmpw(),
+            (  0x7, 0xA) => self.addw(),
+            (  0x9, 0xA) => self.subw(),
+            (  0xB, 0xA) => self.mov_load_word(),
+            (  0xD, 0xA) => self.mov_store_word(),
+            (  0xF, 0xA) => self.mov_store_dp_dp(),
+            (upper, 0xB) if upper <= 0x7 && upper % 2 == 0 => {
+                let op = shift_select(upper);
+                self.shift_dp(opcode, op);
+            },
+            (upper, 0xB) if upper <= 0x7 => {
+                let op = shift_select(upper);
+                self.shift_x_idx_indirect(opcode, op);
+            },
+            (  0x8, 0xB) => self.inc_dec_dp(opcode),
+            (  0x9, 0xB) => self.inc_dec_x_idx_indirect(opcode),
+            (  0xA, 0xB) => self.inc_dec_dp(opcode),
+            (  0xB, 0xB) => self.inc_dec_x_idx_indirect(opcode),
+            (  0xC, 0xB) => self.mov_store_dp_reg(2),
+            (  0xD, 0xB) => self.mov_store_x_idx_indirect(2),
+            (  0xE, 0xB) => self.mov_load_dp(2),
+            (  0xF, 0xB) => self.mov_load_x_idx_indirect(2),
+            (upper, 0xC) if upper <= 0x7 && upper % 2 == 0 => {
+                let op = shift_select(upper);
+                self.shift_addr(opcode, op);
+            },
+            (upper, 0xC) if upper <= 0x7 => {
+                let op = shift_select(upper);
+                self.shift_acc(opcode, op);
+            },
+            (  0x8, 0xC) => self.inc_dec_addr(opcode),
+            (  0x9, 0xC) => self.inc_dec_reg(opcode, 0),
+            (  0xA, 0xC) => self.inc_dec_addr(opcode),
+            (  0xB, 0xC) => self.inc_dec_reg(opcode, 0),
+            (  0xC, 0xC) => self.mov_store_addr(2),
+            (  0xD, 0xC) => self.inc_dec_reg(opcode, 2),
+            (  0xE, 0xC) => self.mov_load_addr(2),
+            (  0xF, 0xC) => self.inc_dec_reg(opcode, 2),
+            (  0x0, 0xD) => self.push(3),
+            (  0x1, 0xD) => self.inc_dec_reg(opcode, 1),
+            (  0x2, 0xD) => self.push(0),
+            (  0x3, 0xD) => self.inc_dec_reg(opcode, 1),
+            (  0x4, 0xD) => self.push(1),
+            (  0x5, 0xD) => self.mov_reg_reg(0, 1),
+            (  0x6, 0xD) => self.push(2),
+            (  0x7, 0xD) => self.mov_reg_reg(1, 0),
+            (  0x8, 0xD) => self.mov_reg_imm(2),
+            (  0x9, 0xD) => self.mov_reg_reg(3, 1),
+            (  0xA, 0xD) => self.alu_imm(2, cmp),
+            (  0xB, 0xD) => self.mov_reg_reg(1, 3),
+            (  0xC, 0xD) => self.mov_reg_imm(1),
+            (  0xD, 0xD) => self.mov_reg_reg(2, 0),
+            (  0xE, 0xD) => self.notc(),
+            (  0xF, 0xD) => self.mov_reg_reg(0, 2),
+            (  0x0, 0xE) => self.tset1(),
+            (  0x1, 0xE) => self.alu_addr(1, cmp),
+            (  0x2, 0xE) => self.cbne(opcode),
+            (  0x3, 0xE) => self.alu_dp(1, cmp),
+            (  0x4, 0xE) => self.tclr1(),
+            (  0x5, 0xE) => self.alu_addr(2, cmp),
+            (  0x6, 0xE) => self.dbnz_data(),
+            (  0x7, 0xE) => self.alu_dp(2, cmp),
+            (  0x8, 0xE) => self.pop(3),
+            (  0x9, 0xE) => self.div(),
+            (  0xA, 0xE) => self.pop(0),
+            (  0xB, 0xE) => self.das(),
+            (  0xC, 0xE) => self.pop(1),
+            (  0xD, 0xE) => self.cbne(opcode),
+            (  0xE, 0xE) => self.pop(2),
+            (  0xF, 0xE) => self.dbnz_y(),
+            (  0x0, 0xF) => self.brk(),
+            (  0x1, 0xF) => self.jmp_abs_x(),
+            (  0x2, 0xF) => self.bra(),
+            (  0x3, 0xF) => self.call(),
+            (  0x4, 0xF) => self.pcall(),
+            (  0x5, 0xF) => self.jmp_abs(),
+            (  0x6, 0xF) => self.ret(),
+            (  0x7, 0xF) => self.ret1(),
+            (  0x8, 0xF) => self.mov_store_dp_imm(),
+            (  0x9, 0xF) => self.xcn(),
+            (  0xA, 0xF) => self.mov_store_x_indirect_inc(),
+            (  0xB, 0xF) => self.mov_load_x_indirect_inc(),
+            (  0xC, 0xF) => self.mul(),
+            (  0xD, 0xF) => self.daa(),
+            (  0xE, 0xF) => self.sleep_or_stop(),
+            (  0xF, 0xF) => self.sleep_or_stop(),
+            (upper, lower) => panic!("invalid parsed opcode. upper: {:#04x}, lower: {:#04x}", upper, lower),
+        }
+
+        self.dsp.flush(&mut self.ram);  // flush in force                
         unsafe {
             ALL_CYCLE += self.cycle_counter - before_cycle;
         }    
     }
 
-    fn renew_psw(&mut self, (flag, mask): Flag) {
-        // negate flags
-        let psw = self.reg.psw.get();
-        self.reg.psw.set(!(flag ^ mask) & psw);
-
-        // assert flags
-        let psw = self.reg.psw.get();
-        self.reg.psw.set((flag & mask) | psw);
-    }
-
-    fn trans_into_decimal(&mut self, inst: &Instruction, op: impl Fn(u8, bool, bool) -> (u8, Flag)) -> Flag {
-        let (op0_sub, inc) = Subject::new(self, inst.op0, inst.raw_op, false);
-        let op0 = op0_sub.read(self);
-        self.reg.inc_pc(inc);
-               
-        self.cycles(1);
-        let (res, psw) = op(op0 as u8, self.reg.psw.half(), self.reg.psw.carry());
-        op0_sub.write(self, res as u16);
-
-        psw
-    }
-
-    fn calc_with_carry(&mut self, inst: &Instruction, op: impl Fn(u8, u8, bool) -> (u8, Flag)) -> Flag {
-        let (op1_sub, incl) = Subject::new(self, inst.op1, inst.raw_op, false);
-        self.reg.inc_pc(incl);
-        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false);
-        self.reg.inc_pc(incl);
-
-        let op0 = op0_sub.read(self) as u8;
-        let op1 = op1_sub.read(self) as u8;
-
-        let (res, pwd) = op(op0, op1, self.reg.psw.carry());
-
-        if inst.opcode != Opcode::CMP {
-            op0_sub.write(self, res as u16);
+    fn mov_reg_imm(&mut self, to: u8) -> () {
+        let imm = self.read_from_pc();
+        match to {
+            0 => self.reg.a = imm,
+            1 => self.reg.x = imm,
+            2 => self.reg.y = imm,
+            _ => panic!("register type must be between 0 to 2"),
         }
 
-        pwd
+        self.set_mov_flag(imm);
     }
 
-    fn exec_mov(&mut self, inst: &Instruction) -> Flag {
-        let (op1_sub, incl) = Subject::new(self, inst.op1, inst.raw_op, false);
-        self.reg.inc_pc(incl);        
-        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false);
-        self.reg.inc_pc(incl);      
-        self.cycles(1)  
-
-        let op1 = op1_sub.read(self) as u8;
+    fn mov_reg_reg(&mut self, from: u8, to: u8) -> () {
+        self.cycles(1);
         
-        let (res, pwd) = eight_alu::mov(op1);
-
-        let pwd = match op0_sub {
-            Subject::Addr(addr, _) if (inst.raw_op != 0xFA) && (inst.raw_op != 0xAF) => {
-                if (inst.raw_op != 0xFA) && (inst.raw_op != 0xAF) {
-                    self.read_ram(addr);
-                }
-
-                (0x00, 0x00)
-                
-            }
-            _ => { pwd }
+        let data = match from {
+            0 => self.reg.a,
+            1 => self.reg.x,
+            2 => self.reg.y,
+            3 => self.reg.sp,
+            _ => panic!("register type must be between 0 to 3"),
         };
 
-        
-        op0_sub.write(self, res as u16);
-
-        pwd
-    }
-
-    fn exec_movw(&mut self, inst: &Instruction) -> Flag {
-        let (op1_sub, incl) = Subject::new(self, inst.op1, inst.raw_op, true);
-        self.reg.inc_pc(incl);
-        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, true);
-        self.reg.inc_pc(incl);
-
-        let op1 = op1_sub.read(self);
-        
-        let (res, pwd) = sixteen_alu::movw(op1);
-
-        let pwd = match op0_sub {
-            Subject::Addr(addr, _) => {
-                self.read_ram(addr);
-                (0x00, 0x00)
-            }
-            _ => { pwd }
-        };
-        
-        op0_sub.write(self, res);
-
-        pwd
-    }
-    
-    fn exec_push(&mut self, inst: &Instruction) -> Flag {
-        let (subject, inc) = Subject::new(self, inst.op0, inst.raw_op, false);
-        let data = subject.read(self) as u8;
-        self.reg.inc_pc(inc);
-
-        self.push(data);
-
-        (0x00, 0x00)
-    }
-
-    fn exec_pop(&mut self, inst: &Instruction) -> Flag {
-        let (subject, inc) = Subject::new(self, inst.op0, inst.raw_op, false);
-        let _ = subject.read(self);
-        self.reg.inc_pc(inc);
-
-        let data:u8 = self.pop();
-
-        subject.write(self, data as u16);
-
-        (0x00, 0x00)
-    }
-
-    fn branch(&mut self, inst: &mut Instruction) -> Flag {
-        let (op0_sub, incl) = Subject::new(self, inst.op0, inst.raw_op, false); // either psw, [aa], [aa+X] or y
-        self.reg.inc_pc(incl);
-        let op0 = op0_sub.read(self);
-
-        let (rr_sub, incl) =Subject::new(self, inst.op1, inst.raw_op, false);
-        self.reg.inc_pc(incl);
-        let rr = rr_sub.read(self);
-
-        let (bias, is_branch) = match inst.opcode {
-            Opcode::CBNE => {
-                self.cycles(1); condjump::cbne(op0 as u8, self.reg.a, rr as u8)
-            }
-            Opcode::DBNZ => {
-                self.cycles(1);
-
-                let byte = op0.wrapping_sub(1);
-                let (bias, is_branch) = condjump::dbnz(byte as u8, rr as u8);
-
-                op0_sub.write(self, byte);
-
-                (bias, is_branch)
-            }
-            Opcode::BBS => {
-                self.cycles(1); condjump::branch(op0 as u8, rr as u8, true)
-            }
-            Opcode::BBC => {
-                self.cycles(1); condjump::branch(op0 as u8, rr as u8, false)
-            }
-            _ => {
-                condjump::branch(op0 as u8, rr as u8, (inst.raw_op & 0x20) > 0)
-            }
+        match to {
+            0 => self.reg.a = data,
+            1 => self.reg.x = data,
+            2 => self.reg.y = data,
+            3 => self.reg.sp = data,
+            _ => panic!("register type must be between 0 to 3"),
         };
 
-        self.reg.pc = self.reg.pc.wrapping_add(bias);
+        self.set_mov_flag(data);
+    }
+
+    fn mov_load_dp(&mut self, to: u8) -> () {
+        let addr = self.read_from_pc();
+        let data = self.read_from_page(addr);
+
+        match to {
+            0 => self.reg.a = data,
+            1 => self.reg.x = data,
+            2 => self.reg.y = data,
+            _ => panic!("register type must be between 0 to 2"),
+        };
+
+        self.set_mov_flag(data);
+    }
+
+    fn mov_load_x_idx_indirect(&mut self, to: u8) -> () {
+        let addr = self.read_from_pc().wrapping_add(self.reg.x);
+        let data = self.read_from_page(addr);
+        self.cycles(1);
+
+        match to {
+            0 => self.reg.a = data,
+            2 => self.reg.y = data,
+            _ => panic!("register type must be between 0 to 2"),
+        }
+
+        self.set_mov_flag(data);
+    }
+
+    fn mov_load_y_idx_indirect(&mut self) -> () {
+        let addr = self.read_from_pc().wrapping_add(self.reg.y);
+        let data = self.read_from_page(addr);
+        self.cycles(1);
+        self.reg.x = data;
+
+        self.set_mov_flag(data);
+    }
+
+    fn mov_load_addr(&mut self, to: u8) -> () {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+        let data = self.read_ram(addr);
+
+        match to {
+            0 => self.reg.a = data,
+            1 => self.reg.x = data,
+            2 => self.reg.y = data,
+            _ => panic!("register type must be between 0 to 2"),
+        }
+
+        self.set_mov_flag(data);
+    }
+
+    fn mov_load_x_idx_addr(&mut self) -> () {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;    
+        let addr = addr.wrapping_add(self.reg.x as u16);
+        self.cycles(1);
+
+        let data = self.read_ram(addr);
+
+        self.reg.a = data;
+        self.set_mov_flag(data);
+    }
+
+    fn mov_load_y_idx_addr(&mut self) -> () {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;    
+        let addr = addr.wrapping_add(self.reg.y as u16);
+        self.cycles(1);
+
+        let data = self.read_ram(addr);
+
+        self.reg.a = data;
+        self.set_mov_flag(data);
+    }
+
+    fn mov_load_x_indirect(&mut self) -> () {
+        let data = self.read_from_page(self.reg.x);
+        self.cycles(1);
+
+        self.reg.a = data;
+        self.set_mov_flag(data);
+    }
+
+    fn mov_load_x_indirect_inc(&mut self) -> () {
+        self.cycles(1);
+        let data = self.read_from_page(self.reg.x);
+        self.reg.x = self.reg.x.wrapping_add(1);
+        self.cycles(1);
+
+        self.reg.a = data;
+        self.set_mov_flag(data);
+    }
+
+    fn mov_load_y_ind_ind(&mut self) -> () {
+        let base_addr = self.read_from_pc();
+        let lower = self.read_from_page(base_addr) as u16;
+        let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;        
+        let addr = (upper << 8) | lower;
+        let addr = addr.wrapping_add(self.reg.y as u16);
+        self.cycles(1);
+        let data = self.read_ram(addr);
+
+        self.reg.a = data;
+        self.set_mov_flag(data);
+    }
+
+    fn mov_load_x_ind_ind(&mut self) -> () {
+        let base_addr = self.read_from_pc().wrapping_add(self.reg.x);        
+        self.cycles(1);
+        let lower = self.read_from_page(base_addr) as u16;
+        let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;
+        let addr = (upper << 8) | lower;
+        let data = self.read_ram(addr);
+
+        self.reg.a = data;
+        self.set_mov_flag(data);
+    }
+
+    fn mov_load_word(&mut self) -> () {
+        let addr = self.read_from_pc();
+        let word_lower = self.read_from_page(addr) as u16;
+        let word_upper = self.read_from_page(addr.wrapping_add(1)) as u16;
+        let word = (word_upper << 8) | word_lower;
+
+        self.reg.set_ya(word);
+
+        let is_negative = (word & 0x8000) != 0;
+        let is_zero = word == 0;
+        self.reg.psw.set_sign(is_negative);
+        self.reg.psw.set_zero(is_zero);
+    }
+
+    fn set_mov_flag(&mut self, data: u8) -> () {
+        let is_negative = (data & 0x80) != 0;
+        let is_zero = data == 0;
+        self.reg.psw.set_zero(is_zero);
+        self.reg.psw.set_sign(is_negative);
+    }
+
+    fn mov_store_dp_imm(&mut self) -> () {
+        let imm = self.read_from_pc();
+        let addr = self.read_from_pc();
+        let _ = self.read_from_page(addr);        
+
+        self.write_to_page(addr, imm);        
+    }
+
+    fn mov_store_dp_dp(&mut self) -> () {
+        let bb = self.read_from_pc();
+        let aa = self.read_from_pc();
+        let b = self.read_from_page(bb);
+        
+        self.write_to_page(aa, b);
+    }
+
+    fn mov_store_dp_reg(&mut self, reg: u8) -> () {
+        let addr = self.read_from_pc();
+        let _ = self.read_from_page(addr);
+        let data = match reg {
+            0 => self.reg.a,
+            1 => self.reg.x,
+            2 => self.reg.y,
+            _ => panic!("register type must be between 0 to 2"),
+        };
+
+        self.write_to_page(addr, data);
+    }
+
+    fn mov_store_x_idx_indirect(&mut self, reg: u8) -> () {
+        let addr = self.read_from_pc().wrapping_add(self.reg.x);
+        self.cycles(1);
+        let _ = self.read_from_page(addr);
+        let data = match reg {
+            0 => self.reg.a,
+            2 => self.reg.y,    
+            _ => panic!("register type must be 0 or 2"),
+        };
+        
+        self.write_to_page(addr, data);
+    }
+
+    fn mov_store_y_idx_indirect(&mut self) -> () {
+        let addr = self.read_from_pc().wrapping_add(self.reg.y);
+        self.cycles(1);
+        let _ = self.read_from_page(addr);
+        let data = self.reg.x;
+        
+        self.write_to_page(addr, data);
+    }
+
+    fn mov_store_addr(&mut self, reg: u8) -> () {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+        let _ = self.read_ram(addr);
+        let data = match reg { 
+            0 => self.reg.a,
+            1 => self.reg.x,
+            2 => self.reg.y,    
+            _ => panic!("register type must be between 0 to 2"),
+        };
+
+        self.write_ram(addr, data);
+    }
+
+    fn mov_store_x_idx_addr(&mut self) -> () {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+        let addr = addr.wrapping_add(self.reg.x as u16);
+        self.cycles(1);
+        let _ = self.read_ram(addr);
+        
+        self.write_ram(addr, self.reg.a);
+    }
+
+    fn mov_store_y_idx_addr(&mut self) -> () {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+        let addr = addr.wrapping_add(self.reg.y as u16);
+        self.cycles(1);
+        let _ = self.read_ram(addr);
+
+        self.write_ram(addr, self.reg.a);
+    }
+
+    fn mov_store_x_indirect_inc(&mut self) -> () {
+        self.cycles(1);
+        self.write_to_page(self.reg.x, self.reg.a);
+        self.reg.x = self.reg.x.wrapping_add(1);
+        self.cycles(1);
+    }
+
+    fn mov_store_x_indirect(&mut self) -> () {
+        self.cycles(1);
+        self.read_from_page(self.reg.x);
+        self.write_to_page(self.reg.x, self.reg.a);        
+    }
+
+    fn mov_store_x_ind_ind(&mut self) -> () {
+        let base_addr = self.read_from_pc().wrapping_add(self.reg.x);
+        self.cycles(1);
+        let lower = self.read_from_page(base_addr) as u16;
+        let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;
+        let addr = (upper << 8) | lower;
+        let _ = self.read_ram(addr);
+
+        self.write_ram(addr, self.reg.a);
+    }
+
+    fn mov_store_y_ind_ind(&mut self) -> () {
+        let base_addr = self.read_from_pc();
+        let lower = self.read_from_page(base_addr) as u16;
+        let upper = self.read_from_page(base_addr) as u16;
+        let addr = (upper << 8) | lower;        
+        let addr = addr.wrapping_add(self.reg.y as u16);
+        self.cycles(1);
+        let _ = self.read_ram(addr);
+        
+        self.write_ram(addr, self.reg.a);
+    }
+
+    fn mov_store_word(&mut self) -> () {
+        let addr = self.read_from_pc();
+        let _ = self.read_from_page(addr);
+        self.write_to_page(addr, self.reg.a);
+        self.write_to_page(addr.wrapping_add(1), self.reg.y);
+    }
+
+    fn push(&mut self, reg: u8) -> () {
+        self.cycles(1);
+        let data = match reg {
+            0 => self.reg.a,
+            1 => self.reg.x,
+            2 => self.reg.y,
+            3 => self.reg.psw.get(),
+            _ => panic!("register type must be between 0 to 3"),
+        };
+        self.write_to_stack(data);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.cycles(1);
+    }
+
+    fn pop(&mut self, reg: u8) -> () {
+        self.reg.sp = self.reg.sp.wrapping_add(1);
+        self.cycles(1);
+        let data = self.read_from_stack();
+        match reg {
+            0 => self.reg.a = data,
+            1 => self.reg.x = data,
+            2 => self.reg.y = data,
+            3 => self.reg.psw.set(data),
+            _ => panic!("register type must be between 0 to 3"),
+        };
+        self.cycles(1);
+    }
+
+    fn nop(&mut self) -> () {
+        self.cycles(1);
+    }
+
+    fn sleep_or_stop(&mut self) -> () {
+        self.is_stopped = true;
+        self.cycles(2);
+    }
+
+    fn clrp(&mut self) -> () {
+        self.reg.psw.negate_page();
+        self.cycles(1);
+    }
+
+    fn setp(&mut self) -> () {
+        self.reg.psw.assert_page();
+        self.cycles(1);
+    }
+
+    fn ei(&mut self) -> () {
+        self.reg.psw.assert_interrupt();
+        self.cycles(2);
+    }
+
+    fn di(&mut self) -> () {
+        self.reg.psw.negate_overflow();
+        self.cycles(2);
+    }
+
+    fn set1(&mut self, opcode: u8) -> () {
+        let addr = self.read_from_pc();
+        let shamt = (opcode >> 5) & 1;
+        let x = self.read_from_page(addr) | (1 << shamt);
+
+        self.write_to_page(addr, x);        
+    }
+
+    fn clr1(&mut self, opcode: u8) -> () {
+        let addr = self.read_from_pc();
+        let shamt = (opcode >> 5) & 1;
+        let x = self.read_from_page(addr) & !(1 << shamt);
+
+        self.write_to_page(addr, x);
+    }
+
+    fn not1(&mut self) -> () {
+        let (addr, bit_idx) = self.addr_and_idx();
+        let data = self.read_ram(addr);
+        let ret = data ^ (1 << bit_idx);
+        
+        self.write_ram(addr, ret);
+    }
+
+    fn mov1_to_mem(&mut self) -> () {
+        let (addr, bit_idx) = self.addr_and_idx();        
+        let data = self.read_ram(addr);
+        self.cycles(1);
+        let ret = 
+            if self.reg.psw.carry() {
+                data & !(1 << bit_idx)
+            } else {
+                data | (1 << bit_idx)
+            };
+        
+        self.write_ram(addr, ret);        
+    }
+
+    fn mov1_to_psw(&mut self) -> () {
+        let (addr, bit_idx) = self.addr_and_idx();
+        let data = self.read_ram(addr);
+        let carry = (data >> bit_idx) & 1;
+        self.reg.psw.set_carry(carry == 1);
+    }
+
+    fn or1(&mut self, opcode: u8) -> () {
+        let rev = (opcode & 0x20)  != 0;
+        let (addr, bit_idx) = self.addr_and_idx();
+        let data = self.read_ram(addr);
+        let bit = ((data >> bit_idx) & 1) == 1;        
+        let ret = self.reg.psw.carry () | (rev ^ bit);
+        self.cycles(1);
+
+        self.reg.psw.set_carry(ret);
+    }
+
+    fn and1(&mut self, opcode: u8) -> () {
+        let rev = (opcode & 0x20) != 0;
+        let (addr, bit_idx) = self.addr_and_idx();
+        let data = self.read_ram(addr);
+        let bit = ((data >> bit_idx) & 1) == 1;        
+        let ret = self.reg.psw.carry () & (rev ^ bit);
+        
+        self.reg.psw.set_carry(ret);
+    }
+
+    fn eor1(&mut self) -> () {
+        let (addr, bit_idx) = self.addr_and_idx();
+        let data = self.read_ram(addr);
+        let bit = ((data >> bit_idx) & 1) == 1;        
+        let ret = self.reg.psw.carry () ^ bit;
+        self.cycles(1);
+
+        self.reg.psw.set_carry(ret);
+    }
+
+    fn clrc(&mut self) -> () {
+        self.cycles(1);
+        self.reg.psw.set_carry(false);
+    }
+
+    fn setc(&mut self) -> () {
+        self.cycles(1);
+        self.reg.psw.set_carry(true);
+    }
+
+    fn notc(&mut self) -> () {
+        self.cycles(2);
+        self.reg.psw.set_carry(!self.reg.psw.carry());
+    }
+
+    fn clrv(&mut self) -> () {
+        self.cycles(1);
+        self.reg.psw.set_overflow(false);
+        self.reg.psw.set_half(false);
+    }
+
+    fn addr_and_idx(&mut self) -> (u16, u8) {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+        let idx = (addr >> 13) as u8;
+        let addr = addr & 0x1FFF;
+
+        (addr, idx)
+    }
+
+    fn branch_by_psw(&mut self, opcode: u8) -> () {
+        let rr = self.read_from_pc() as u16;        
+        let flag_type = opcode & !(0x20);
+        let require_true = (opcode & 0x20) != 0;
+        let flag = match flag_type {
+            0x10 => self.reg.psw.sign(),
+            0x50 => self.reg.psw.overflow(),
+            0x90 => self.reg.psw.carry(),
+            0xD0 => self.reg.psw.zero(),
+            _ => panic!("flag type must be between 0x10, 0x50, 0x90, 0xD0. actual: {:#04x}", flag_type),
+        };
+
+        let branch = flag == require_true;        
+        if branch { 
+            self.cycles(2);
+            let offset = if (rr & 0x80) != 0 { rr | 0xFF00 } else { rr };
+            self.reg.pc = self.reg.pc.wrapping_add(offset);
+         }
+    }
+
+    fn branch_by_mem_bit(&mut self, opcode: u8) -> () {
+        let addr = self.read_from_pc();
+        let data = self.read_from_page(addr);        
+        let offset = self.read_from_pc() as u16;
+        let offset = if (offset & 0x80) != 0 { 0xFF00 | offset } else { offset };
+
+        let require_true = (opcode & 0x10) == 0;
+        let bit_idx = (opcode >> 5) & 0x7;
+        self.cycles(1);
+
+        let bit = ((data >> bit_idx) & 1) == 1;
+        let is_branch = bit == require_true;
 
         if is_branch {
             self.cycles(2);
+            self.reg.pc = self.reg.pc.wrapping_add(offset);
         }
-
-        (0x00, 0x00)
     }
 
-    fn relative_jump(&mut self, inst: &Instruction) -> Flag {
-        let (rr_sub, inc) = Subject::new(self,inst.op0, inst.raw_op, false);
-        let rr = rr_sub.read(self);
-        self.reg.inc_pc(inc);
-
-        let rr = if (rr & 0x80) > 0 {
-            rr | 0xff00
-        } else {
-            rr
+    fn cbne(&mut self, opcode: u8) -> () {
+        let aa = self.read_from_pc();
+        let require_x = match opcode {
+            0x2E => false,
+            0xDE => true,
+            _ => panic!("expected opcodes are 0x2E and 0xDE. actual: {:#04x}", opcode),
         };
-            
-        self.reg.pc = self.reg.pc.wrapping_add(rr);
+        let addr = 
+            if require_x { self.cycles(1); aa.wrapping_add(self.reg.x) }
+            else { aa };
+        let data = self.read_from_page(addr);
+        let rr = self.read_from_pc() as u16;
+        self.cycles(1);
 
-        (0x00, 0x00)
+        if self.reg.a != data {
+            let offset = if (rr & 0x80) != 0 { 0xFF00 | rr } else { rr };
+            self.reg.pc = self.reg.pc.wrapping_add(offset);
+            self.cycles(2);
+        }
     }
 
-    fn absolute_jump(&mut self, inst: &Instruction) -> Flag {
-        let (addr_sub, inc) = Subject::new(self, inst.op0, inst.raw_op, true);
-        self.reg.inc_pc(inc);
-
-        let dst = match inst.raw_op {
-            0x5f => {
-                match addr_sub {
-                    Subject::Addr(addr, _ ) => { addr }
-                    _ => { panic!("This code is unreachable.") }
-                }
-            }
-            0x1f => {
-                addr_sub.read(self)
-            }
-            _ => {
-                panic!("This code is unreacheable")
-            }
-        };
-
-        self.reg.pc = dst;
-
-        (0x00, 0x00)
-    }
-
-    fn call(&mut self, inst: &Instruction) -> Flag {
-        let (subject, inc) = Subject::new(self, inst.op0, inst.raw_op, false);
-        self.reg.inc_pc(inc);
-
-        let dst = match subject {
-            Subject::Addr(addr, _) => { addr }
-            _ => { panic!("This code is unreachable") }
-        };
-
-        self.push(self.reg.pc);
-        self.reg.pc = dst;
-
-        (0x00, 0x00)
-    }
-
-    fn tcall(&mut self, inst: &Instruction) -> Flag {
-        let n = (((inst.raw_op >> 4) & 0x0f) << 1) as u16;
-        self.push(self.reg.pc);
-
-        let lsb =self.read_ram(0xffde - n) as u16;
-        let msb = self.read_ram(0xffde - n + 1) as u16;
-        
-        self.cycles(3);
-        let current_pc = self.reg.pc;
-        self.push(current_pc);
-
-        self.reg.pc = msb << 8 | lsb;
-
-        (0x00, 0x00)
-    }
-
-    fn pcall(&mut self, inst: &Instruction) -> Flag {
-        let (nn_sub, inc) = Subject::new(self, inst.op0, inst.raw_op, false);
-        self.reg.inc_pc(inc);
-        let nn = nn_sub.read(self);
-        let dst = 0xff00 | nn;
-
-        self.push(self.reg.pc);
-        self.reg.pc = dst;
-
-        (0x00, 0x00)
-    }
-
-    fn ret(&mut self) -> Flag {
-        let dst: u16 = self.pop();
-        self.reg.pc = dst;
-
-        (0x00, 0x00)
-    }
-
-    fn ret1(&mut self) -> Flag {
-        let psw: u8 = self.pop();
-        let pc: u16 = self.pop();
-
-        self.reg.pc = pc;
-        self.reg.psw.set(psw);
-
-        (0x00, 0x00)
-    }
-
-    fn brk(&mut self) -> Flag {
-        let pc_lsb = self.read_ram(0xffde) as u16;
-        let pc_msb = self.read_ram(0xffdf) as u16;
-        let next_pc = (pc_msb << 8) | pc_lsb;
-
+    fn dbnz_y(&mut self) -> () {
+        let rr = self.read_from_pc() as u16;
+        self.reg.y = self.reg.y.wrapping_sub(1);
         self.cycles(2);
-        self.push(self.reg.pc);
-        self.push(self.reg.psw.get());        
+        
+        if self.reg.y != 0 {
+            self.cycles(2);
+            let offset = if (rr & 0x80) != 0 { 0xFF00 | rr } else { rr };
+            self.reg.pc = self.reg.pc.wrapping_add(offset);
+        }
+    }
+
+    fn dbnz_data(&mut self) -> () {
+        let addr = self.read_from_pc();
+        let rr = self.read_from_pc() as u16;
+        let data = self.read_from_page(addr).wrapping_sub(1);        
+        self.write_to_page(addr, data);        
+        self.cycles(1);
+
+        if data != 0 {
+            self.cycles(2);
+            let offset = if (rr & 0x80) != 0 { 0xFF00 | rr } else { rr };
+            self.reg.pc = self.reg.pc.wrapping_add(offset);
+        }
+    }
+
+    fn bra(&mut self) -> () {
+        let rr = self.read_from_pc() as u16;
+        self.cycles(2);
+        let offset = if (rr & 0x80) != 0 { 0xFF00 | rr } else { rr };
+        self.reg.pc = self.reg.pc.wrapping_add(offset);
+    }
+
+    fn jmp_abs(&mut self) -> () {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+
+        self.reg.pc = addr;
+    }
+
+    fn jmp_abs_x(&mut self) -> () {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+        let addr = addr.wrapping_add(self.reg.x as u16);
+        self.cycles(1);
+
+        let dst_lower = self.read_ram(addr) as u16;
+        let dst_upper = self.read_ram(addr.wrapping_add(1)) as u16;
+
+        self.reg.pc = (dst_upper << 8) | dst_lower;
+    }
+    
+    fn call(&mut self) -> () {
+        let dst_lower = self.read_from_pc() as u16;
+        let dst_upper = self.read_from_pc() as u16;
+        let dst = (dst_upper << 8) | dst_lower;
+
+        self.cycles(1);
+        self.write_to_stack((self.reg.pc >> 8) as u8);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.cycles(1);
+        self.write_to_stack(self.reg.pc as u8);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.cycles(1);
+    
+        self.reg.pc = dst;
+    }
+
+    fn tcall(&mut self, opcode: u8) -> () {
+        let pc_lower = self.reg.pc as u8;
+        let pc_upper = (self.reg.pc >> 8) as u8;
+        self.write_to_stack(pc_upper);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.cycles(1);
+
+        self.write_to_stack(pc_lower);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.cycles(1);
+
+        let offset = ((opcode >> 4) << 1) as u16;        
+        let addr = 0xFFDE - offset;        
+        self.cycles(1);
+
+        let next_pc_lower = self.read_ram(addr) as u16;
+        let next_pc_upper = self.read_ram(addr.wrapping_add(1)) as u16;
+        let next_pc = (next_pc_upper << 8) | next_pc_lower;
 
         self.reg.pc = next_pc;
-        self.reg.psw.assert_brk();
-        self.reg.psw.negate_interrupt();
-
-        (0x00, 0x00)
     }
 
-    fn clrp(&mut self) -> Flag {
-        self.reg.psw.negate_page();
-        (0x00, 0x00)
-    }
+    fn pcall(&mut self) -> () {        
+        let lower = self.read_from_pc() as u16;
+        let next_pc = 0xFF00 | lower;
 
-    fn setp(&mut self) -> Flag {
-        self.reg.psw.assert_page();
-        (0x00, 0x00)
-    }
-
-    fn ei(&mut self) -> Flag {
-        self.reg.psw.assert_interrupt();
-        (0x00, 0x00)
-    }
-
-    fn di(&mut self) -> Flag {
-        self.reg.psw.negate_interrupt();
-        (0x00, 0x00)
-    }
-
-    pub fn read_ram(&mut self, addr: u16) -> u8 {
+        let pc_lower = self.reg.pc as u8;
+        let pc_upper = (self.reg.pc >> 8) as u8;
+        self.write_to_stack(pc_upper);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
         self.cycles(1);
-        self.read_ram_without_cycle(addr)
+
+        self.write_to_stack(pc_lower);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.cycles(1);
+
+        self.reg.pc = next_pc;
     }
 
-    pub fn read_ram_without_cycle(&mut self, addr: u16) -> u8 {
-        let data = self.ram.read(addr, &mut self.dsp, &mut self.timer);
-        // println!("[ read ram] addr: {:#06x}, data: {:#04x}", addr, data);
+    fn ret(&mut self) -> () {
+        let partial_pcs: Vec<u8> = (0..2).map(|_| {
+            self.reg.sp = self.reg.sp.wrapping_add(1);
+            self.cycles(1);
+            let partial_pc = self.read_from_stack();            
+
+            partial_pc
+        }).collect();
+        
+        let lower = partial_pcs[0] as u16;
+        let upper = partial_pcs[1] as u16;
+        let next_pc = (upper << 8) | lower;
+
+        self.reg.pc = next_pc;
+    }
+
+    fn ret1(&mut self) -> () {
+        let psw = self.read_from_stack();
+        self.reg.sp = self.reg.sp.wrapping_add(1);
+        self.reg.psw.set(psw);
+        
+        let lower_pc = self.read_from_stack() as u16;
+        self.reg.sp = self.reg.sp.wrapping_add(1);
+        self.cycles(1);
+
+        let upper_pc = self.read_from_stack() as u16;
+        self.reg.sp = self.reg.sp.wrapping_add(1);
+        self.cycles(1);
+
+        self.reg.pc = (upper_pc << 8) | (lower_pc)
+    }
+
+    fn brk(&mut self) -> () {
+        let lower = self.read_ram(0xFFDE) as u16;
+        let upper = self.read_ram(0xFFDF) as u16;
+        let next_pc = (upper << 8) | lower;
+
+        let pc_lower = self.reg.pc as u8;
+        let pc_upper = (self.reg.pc >> 8) as u8;
+        self.write_to_stack(pc_upper);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.cycles(1);
+        self.write_to_stack(pc_lower);
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        self.cycles(1);
+
+        self.write_to_stack(self.reg.psw.get());
+        self.reg.sp = self.reg.sp.wrapping_sub(1);
+        
+        self.reg.pc = next_pc;
+    }    
+
+    fn alu_dp(&mut self, from: u8, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+        let addr = self.read_from_pc();        
+        let b = self.read_from_page(addr);
+        let a = match from {
+            0 => self.reg.a,
+            1 => self.reg.x,
+            2 => self.reg.y,
+            _ => panic!("from register types must be between 0 to 2"),
+        };         
+
+        self.reg.a = op(&mut self.reg, a, b);        
+    }
+
+    fn alu_addr(&mut self, from: u8, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {        
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+
+        let b = self.read_ram(addr);
+        let a = match from {
+            0 => self.reg.a,
+            1 => self.reg.x,
+            2 => self.reg.y,
+            _ => panic!("from register types must be between 0 to 2"),
+        };        
+        
+        self.reg.a = op(&mut self.reg, a, b);        
+    }
+
+    fn alu_indirect_x(&mut self, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+        let x = self.reg.x;
+        self.cycles(1);
+
+        let a = self.reg.a;
+        let b = self.read_from_page(x);
+        let data = op(&mut self.reg, a, b);
+
+        self.reg.a = data;        
+    }
+
+    fn alu_x_idx_indirect(&mut self, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+        let base_addr = self.read_from_pc().wrapping_add(self.reg.x);
+        self.cycles(1);
+
+        let lower = self.read_from_page(base_addr) as u16;
+        let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;
+        let addr = (upper << 8) | lower;
+        
+        let a = self.reg.a;
+        let b = self.read_ram(addr);        
+        let ret = op(&mut self.reg, a, b);
+
+        self.reg.a = ret;        
+    }
+
+    fn alu_x_idx_addr(&mut self, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+        let addr = addr.wrapping_add(self.reg.x as u16);
+        self.cycles(1);
+        let data = self.read_ram(addr);
+
+        let a = self.reg.a;
+        let ret = op(&mut self.reg, a, data);
+
+        self.reg.a = ret;
+    }
+
+    fn alu_x_ind_ind(&mut self, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+        let base_addr = self.read_from_pc().wrapping_add(self.reg.x);        
+        self.cycles(1);
+        let lower = self.read_from_page(base_addr) as u16;
+        let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;
+        let addr = (upper << 8) | lower;
+        let data = self.read_ram(addr);
+
+        let a = self.reg.a;
+        let ret = op(&mut self.reg, a, data);
+        
+        self.reg.a = ret;
+    }
+
+    fn alu_y_ind_ind(&mut self, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+        let base_addr = self.read_from_pc();
+        let lower = self.read_from_page(base_addr) as u16;
+        let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;        
+        let addr = (upper << 8) | lower;
+        let addr = addr.wrapping_add(self.reg.y as u16);
+        self.cycles(1);
+        let data = self.read_ram(addr);
+        let a = self.reg.a;
+        
+        let ret = op(&mut self.reg, a, data);
+        
+        self.reg.a = ret;
+    }
+
+    fn alu_y_idx_addr(&mut self, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+        let addr = addr.wrapping_add(self.reg.y as u16);
+        self.cycles(1);
+        let data = self.read_ram(addr);
+        let a = self.reg.a;
+
+        let ret = op(&mut self.reg, a, data);
+
+        self.reg.a = ret;
+    }
+
+    fn alu_x_y(&mut self, is_cmp: bool, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+        self.cycles(1);
+        let x_data = self.read_from_page(self.reg.x);        
+        let y_data = self.read_from_page(self.reg.y);
+        let ret = op(&mut self.reg, x_data, y_data);        
+
+        if !is_cmp {
+            self.write_to_page(self.reg.x, ret);
+        } else {
+            self.cycles(1)
+        }
+    }
+
+    fn alu_imm(&mut self, from: u8, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+        let a = match from {
+            0 => self.reg.a,
+            1 => self.reg.x,
+            2 => self.reg.y,
+            _ => panic!("from register types must be between 0 to 2"),
+        };
+
+        let b = self.read_from_pc();
+        let ret = op(&mut self.reg, a, b);
+
+        match from {
+            0 => self.reg.a = ret,
+            1 => self.reg.x = ret,
+            2 => self.reg.y = ret,
+            _ => panic!("from register types must be between 0 to 2"),
+        };        
+    }
+
+    fn alu_dp_imm(&mut self, is_cmp: bool, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+        let imm = self.read_from_pc();
+        let addr = self.read_from_pc();
+        let data = self.read_from_page(addr);
+        let ret = op(&mut self.reg, data, imm);
+
+        if !is_cmp {
+            self.write_to_page(addr, ret);
+        } else {
+            self.cycles(1);
+        }
+    }
+
+    fn alu_dp_dp(&mut self, is_cmp: bool, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+        let aa = self.read_from_pc();
+        let bb = self.read_from_pc();
+        let a = self.read_from_page(aa);
+        let b = self.read_from_page(bb);
+
+        let ret = op(&mut self.reg, a, b);
+
+        if !is_cmp {
+            self.write_to_page(aa, ret);
+        } else {
+            self.cycles(1);
+        } 
+    }
+
+    fn shift_acc(&mut self, opcode: u8, op: impl Fn(u8, bool) -> (u8, bool)) -> () {
+        self.cycles(1);
+        let ret = self.shift(opcode, self.reg.a, op);
+        
+        self.reg.a = ret;        
+    }
+
+    fn shift_dp(&mut self, opcode: u8, op: impl Fn(u8, bool) -> (u8,bool)) -> () {
+        let addr = self.read_from_pc();
+        let data = self.read_from_page(addr);        
+        let ret = self.shift(opcode, data, op);
+
+        self.write_to_page(addr, ret);
+    }
+
+    fn shift_x_idx_indirect(&mut self, opcode: u8, op: impl Fn(u8, bool) -> (u8, bool)) -> () {
+        let addr = self.read_from_pc().wrapping_add(self.reg.x);
+        self.cycles(1);
+
+        let data = self.read_from_page(addr);
+        let ret = self.shift(opcode, data, op);
+
+        self.write_to_page(addr, ret);
+    }
+
+    fn shift_addr(&mut self, opcode: u8, op: impl Fn(u8, bool) -> (u8, bool)) -> () {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+        let data = self.read_ram(addr);
+
+        let ret = self.shift(opcode, data, op);
+
+        self.write_ram(addr, ret);
+    }
+
+    fn shift(&mut self, opcode: u8, data: u8, op: impl Fn(u8, bool) -> (u8, bool)) -> u8 {
+        let use_carry = (opcode & 0x20) != 0;
+        let bit = if use_carry { self.reg.psw.carry() } else { false };
+        let (data, is_carry) = op(data, bit);
+
+        let is_zero = data == 0;
+        let is_neg = (data & 0x80) != 0;
+        self.reg.psw.set_carry(is_carry);
+        self.reg.psw.set_zero(is_zero);
+        self.reg.psw.set_sign(is_neg);
+
         data
+    }
+
+    fn inc_dec_reg(&mut self, opcode: u8, reg_type: u8) -> () {
+        self.cycles(1);
+
+        let is_inc = (opcode & 0x20) != 0;
+        let data = match reg_type {
+            0 => self.reg.a,
+            1 => self.reg.x,
+            2 => self.reg.y,
+            _ => panic!("require 0 to 2 as register type"),
+        };
+
+        let ret =
+            if is_inc { data.wrapping_add(1) }
+            else      { data.wrapping_sub(1) };
+
+        match reg_type {
+            0 => self.reg.a = ret,
+            1 => self.reg.x = ret,
+            2 => self.reg.y = ret,
+            _ => panic!("require 0 to 2 as register type"),
+        }
+
+        self.set_inc_dec_flag(ret);
+    }
+
+    fn inc_dec_dp(&mut self, opcode: u8) -> () {
+        let is_inc = (opcode & 0x20) != 0;
+        let addr = self.read_from_pc();
+        let data = self.read_from_page(addr);
+        let ret =
+            if is_inc { data.wrapping_add(1) }
+            else      { data.wrapping_sub(1) };
+
+        self.write_to_page(addr, ret);
+        self.set_inc_dec_flag(ret);
+    }
+
+    fn inc_dec_x_idx_indirect(&mut self, opcode: u8) -> () {
+        let is_inc = (opcode & 0x20) != 0;
+        let addr = self.read_from_pc().wrapping_add(self.reg.x);
+        self.cycles(1);
+
+        let data = self.read_from_page(addr);
+        let ret = 
+            if is_inc { data.wrapping_add(1) }
+            else      { data.wrapping_sub(1) };
+
+        self.write_to_page(addr, ret);
+        self.set_inc_dec_flag(ret);
+    }
+
+    fn inc_dec_addr(&mut self, opcode: u8) -> () {
+        let is_inc = (opcode & 0x20) != 0;
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+        let data = self.read_ram(addr);
+
+        let ret =
+            if is_inc { data.wrapping_add(1) }
+            else      { data.wrapping_sub(1) };
+
+        self.write_ram(addr, ret);
+        self.set_inc_dec_flag(ret);
+    }
+    
+    fn set_inc_dec_flag(&mut self, data: u8) -> () {
+        let is_neg = (data & 0x80) != 0;
+        let is_zero = data == 0;
+
+        self.reg.psw.set_sign(is_neg);
+        self.reg.psw.set_zero(is_zero);
+    }
+
+    fn addw(&mut self) -> () {
+        self.reg.psw.negate_carry();
+
+        let (ya, word) = self.get_word_operands();        
+        let ret_lower = adc(&mut self.reg, ya as u8, word as u8) as u16;
+        let ret_upper = adc(&mut self.reg, (ya >> 8) as u8, (word >> 8) as u8) as u16;
+        let ret = (ret_upper << 8) | ret_lower;
+                
+        self.cycles(1);
+        self.reg.set_ya(ret);
+
+        self.reg.psw.set_zero(ret == 0);
+    }
+
+    fn subw(&mut self) -> () {
+        self.reg.psw.assert_carry();
+
+        let (ya, word) = self.get_word_operands();
+        let ret_lower = sbc(&mut self.reg, ya as u8, word as u8) as u16;
+        let ret_upper = sbc(&mut self.reg, (ya >> 8) as u8, (word >> 8) as u8) as u16;
+        let ret = (ret_upper << 8) | ret_lower;
+
+        self.cycles(1);
+        self.reg.set_ya(ret);
+
+        self.reg.psw.set_zero(ret == 0);
+    }
+
+    fn cmpw(&mut self) -> () {
+        let (ya, word) = self.get_word_operands();
+        let ret = (ya as i32) - (word as i32);
+
+        self.reg.psw.set_sign((ret & 0x8000) != 0);
+        self.reg.psw.set_zero(ret as u16 == 0);
+        self.reg.psw.set_carry(ret >= 0);
+    }
+
+    fn inc_dec_word(&mut self, op: impl Fn(u16) -> u16) -> () {
+        let addr = self.read_from_pc();
+        let word_lower = self.read_from_page(addr) as u16;
+        let word_upper = self.read_from_page(addr.wrapping_add(1)) as u16;
+        let word = (word_upper << 8) | word_lower;
+        let ret = op(word);
+        let ret_lower = ret as u8;
+        let ret_upper = (ret >> 8) as u8;
+
+        self.write_to_page(addr, ret_lower);
+        self.write_to_page(addr.wrapping_add(1), ret_upper);
+        self.reg.psw.set_zero(ret == 0);
+        self.reg.psw.set_sign((ret & 0x8000) != 0);
+    }
+
+    fn div(&mut self) -> () {
+        self.cycles(12);
+        let ya = self.reg.ya();
+        let x = self.reg.x as u16;
+
+        self.reg.psw.set_overflow(self.reg.y >= self.reg.x);
+        self.reg.psw.set_half((self.reg.y & 0x0F) >= (self.reg.x & 0x0F));
+
+        if (self.reg.y as u16) < (x << 1) {
+            self.reg.a = (ya / x) as u8;
+            self.reg.y = (ya % x) as u8;
+        } else {
+            self.reg.a = (255 - (ya - (x << 9)) / (256 - x)) as u8;
+            self.reg.y = (x + (ya - (x << 9)) % (256 - x)) as u8;
+        }
+        
+        self.reg.psw.set_zero(self.reg.a == 0);
+        self.reg.psw.set_sign((self.reg.a & 0x80) != 0);
+    }
+
+    fn mul(&mut self) -> () {
+        self.cycles(8);
+        let ya = (self.reg.y as u16) * (self.reg.a as u16);
+        self.reg.set_ya(ya);
+
+        self.reg.psw.set_zero(self.reg.y == 0);
+        self.reg.psw.set_sign((self.reg.y & 0x80) != 0);
+    }
+
+    fn get_word_operands(&mut self) -> (u16, u16) {
+        let addr = self.read_from_pc();
+        let word_lower = self.read_from_page(addr) as u16;
+        let word_upper = self.read_from_page(addr.wrapping_add(1)) as u16;
+        let word = (word_upper << 8) | word_lower;
+        let ya = self.reg.ya();
+
+        (ya, word)
+    }
+
+    fn daa(&mut self) -> () {
+        self.cycles(2);
+        if self.reg.psw.carry() || self.reg.a > 0x99 {
+            self.reg.a = self.reg.a.wrapping_add(0x60);
+            self.reg.psw.assert_carry();
+        }
+        if self.reg.psw.half() || (self.reg.a & 0x0F) > 0x09 {
+            self.reg.a = self.reg.a.wrapping_add(0x06);            
+        }
+
+        self.reg.psw.set_zero(self.reg.a == 0);
+        self.reg.psw.set_sign((self.reg.a & 0x80) != 0);
+    }
+
+    fn das(&mut self) -> () {
+        self.cycles(2);
+        if !self.reg.psw.carry() || self.reg.a > 0x99 {
+            self.reg.a = self.reg.a.wrapping_sub(0x60);
+            self.reg.psw.set_carry(false);
+        }
+        if !self.reg.psw.half() || (self.reg.a & 0x0F) > 0x09 {
+            self.reg.a = self.reg.a.wrapping_sub(0x06);
+        }
+
+        self.reg.psw.set_zero(self.reg.a == 0);
+        self.reg.psw.set_sign((self.reg.a & 0x80) != 0);
+    }
+
+    fn xcn(&mut self) -> () {
+        self.cycles(4);
+        self.reg.a = (self.reg.a >> 4) | ((self.reg.a & 0x0F) << 4);
+
+        self.reg.psw.set_zero(self.reg.a == 0);
+        self.reg.psw.set_sign((self.reg.a & 0x80) != 0); 
+    }
+
+    fn tclr1(&mut self) -> () {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+        let data = self.read_ram(addr);
+        let ret = data & !self.reg.a;
+        
+        let cmp = self.reg.a.wrapping_sub(data);
+        self.reg.psw.set_zero(cmp == 0);
+        self.reg.psw.set_sign((cmp & 0x80) != 0);
+
+        self.write_ram(addr, ret);
+
+    }
+
+    fn tset1(&mut self) -> () {
+        let lower = self.read_from_pc() as u16;
+        let upper = self.read_from_pc() as u16;
+        let addr = (upper << 8) | lower;
+        let data = self.read_ram(addr);
+        let ret = data | self.reg.a;
+
+        let cmp = self.reg.a.wrapping_sub(data);
+        self.reg.psw.set_zero(cmp == 0);
+        self.reg.psw.set_sign((cmp & 0x80) != 0);
+
+        self.write_ram(addr, ret);
+    }
+
+    fn read_from_pc(&mut self) -> u8 {
+        let addr = self.reg.pc;
+        self.reg.inc_pc(1);
+    
+        self.read_ram(addr)
+    }
+
+    fn read_from_stack(&mut self) -> u8 {
+        let addr = (self.reg.sp as u16) | 0x0100;    
+        self.read_ram(addr)
+    }
+
+    fn read_from_page(&mut self, addr: u8) -> u8 {
+        let addr = (addr as u16) | (if self.reg.psw.page() { 0x0100 } else { 0x0000 });
+        self.read_ram(addr)
+    }    
+
+    fn read_ram(&mut self, addr: u16) -> u8 {
+        self.cycles(1);
+        let data = self.ram.read(addr, &mut self.dsp, &mut self.timer);
+
+        if addr != 0x00F3 {
+            // println!("[ read ram] addr: {:#06x}, data: {:#04x}", addr, data);
+        }
+        
+        data        
+    }    
+
+    fn write_to_page(&mut self, addr: u8, data: u8) -> () {
+        let addr = (addr as u16) | (if self.reg.psw.page() { 0x0100 } else { 0x0000 });
+        self.write_ram(addr, data)
+    }
+
+    fn write_to_stack(&mut self, data: u8) -> () {
+        let addr = (self.reg.sp as u16) | 0x0100;        
+        self.write_ram(addr, data);        
     }
 
     pub fn write_ram(&mut self, addr: u16, data: u8) -> () {
@@ -614,4 +1491,92 @@ impl Spc700 {
         self.timer.iter_mut().for_each(|timer| timer.cycles(cycle_count));
         self.cycle_counter += cycle_count as u64;
     }
+}
+
+fn or(reg: &mut Register, a: u8, b: u8) -> u8 {
+    let ret = a | b;
+    reg.psw.set_sign((ret & 0x80) != 0);
+    reg.psw.set_zero(ret == 0);
+
+    ret
+}
+
+fn and(reg: &mut Register, a: u8, b: u8) -> u8 {
+    let ret = a & b;
+    reg.psw.set_sign((ret & 0x80) != 0);
+    reg.psw.set_zero(ret == 0);
+
+    ret
+}
+
+fn eor(reg: &mut Register, a: u8, b: u8) -> u8 {
+    let ret = a ^ b;
+    reg.psw.set_sign((ret & 0x80) != 0);
+    reg.psw.set_zero(ret == 0);
+
+    ret
+}
+
+fn cmp(reg: &mut Register, a: u8, b: u8) -> u8 {
+    let ret = (a as i16) - (b as i16);
+    reg.psw.set_sign((ret & 0x80) != 0);
+    reg.psw.set_zero((ret as u8) == 0);
+    reg.psw.set_carry(ret >= 0);
+
+    a
+}
+
+fn adc(reg: &mut Register, a: u8, b: u8) -> u8 {
+    let a = a as i32;
+    let b = b as i32;
+    let r = a + b + reg.psw.carry() as i32;
+
+    reg.psw.set_sign((r as u8 & 0x80) != 0);
+    reg.psw.set_overflow((!(a ^ b) & (a ^ r) & 0x80) != 0);
+    reg.psw.set_half(((a ^ b ^ r) & 0x10) != 0);
+    reg.psw.set_zero(r as u8 == 0);
+    reg.psw.set_carry(r > 0xFF);
+
+    r as u8
+}
+
+fn asl(operand: u8, _is_carry: bool) -> (u8, bool) {
+    let is_carried = (operand & 0x80) != 0;
+    let ret = operand << 1;
+
+    (ret, is_carried)
+}
+
+fn rol(operand: u8, is_carry: bool) -> (u8, bool) {
+    let (shifted, is_carried) = operand.overflowing_shl(1);
+    let ret = shifted | (is_carry as u8);
+
+    (ret, is_carried)
+}
+
+fn lsr(operand: u8, _is_carry: bool) -> (u8, bool) {
+    let ret = operand >> 1;
+    let carried = (operand & 1) != 0;
+
+    (ret, carried)
+}
+
+fn ror(operand: u8, is_carry: bool) -> (u8, bool) {
+    let shifted = operand >> 1;
+    let ret = shifted | ((is_carry as u8) << 7);
+    let carried = (operand & 1) != 0;
+
+    (ret, carried)
+}
+
+fn sbc(reg: &mut Register, a: u8, b: u8) -> u8 {
+    adc(reg, a, !b)
+}
+
+fn inc_word(op: u16) -> u16 {
+    op.wrapping_add(1)
+}
+
+fn dec_word(op: u16) -> u16 {
+    op.wrapping_sub(1)
 }

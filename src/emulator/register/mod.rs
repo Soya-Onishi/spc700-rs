@@ -43,4 +43,19 @@ impl Register {
 
         pc
     }
+
+    pub fn ya(&self) -> u16 {
+        let y = self.y as u16;
+        let a = self.a as u16;
+
+        (y << 8) | a
+    }
+
+    pub fn set_ya(&mut self, ya: u16) -> () {
+        let y = (ya >> 8) as u8;
+        let a = (ya & 0xFF) as u8;
+
+        self.y = y;
+        self.a = a;
+    }
 }
