@@ -2,6 +2,8 @@ use super::DSPRegister;
 use super::DSPBlock;
 use super::CYCLE_RANGE;
 
+use std::i32;
+
 const ADSR_GAIN_RATES: [u16; 32] = [    
     CYCLE_RANGE + 1, 2048, 1536, 1280, 
     1024, 768, 640, 512, 
@@ -63,7 +65,7 @@ impl Envelope {
         let is_adsr_mode = (dsp.reg.adsr & 0x80) > 0;
 
         let (rate, step) =
-            if is_adsr_mode || self.adsr_mode == ADSRMode::Release {
+            if is_adsr_mode || (self.adsr_mode == ADSRMode::Release) {
                 update_envelope_with_adsr(self, &dsp.reg)
             } else {
                 update_envelope_with_gain(self, &dsp.reg)
@@ -71,12 +73,22 @@ impl Envelope {
 
         let new_level = clip_level(self.level as i16, step);
         let new_mode = refresh_mode(new_level, &dsp.reg, self.adsr_mode);
+        
+        match rate {
+            None => {
+                let vol = (step as i32).wrapping_mul(16);
+                let vol = (vol / 0x800) as i16;
 
-        if is_require_renew(cycle_count, rate) {  
-            Envelope::new(new_level, new_mode)
-        } else {
-            Envelope::new(self.level, new_mode)
-        }
+                Envelope::new(vol, new_mode)
+            },
+            Some(rate) => {
+                if is_require_renew(cycle_count, rate) {  
+                    Envelope::new(new_level, new_mode)
+                } else {
+                    Envelope::new(self.level, new_mode)
+                }
+            },
+        }        
     }    
 }
 
@@ -114,10 +126,10 @@ fn update_envelope_with_adsr(env: &Envelope, reg: &DSPRegister) -> (Option<usize
 }
 
 fn update_envelope_with_gain(env: &Envelope, reg: &DSPRegister) -> (Option<usize>, i16) {
-    let is_direct = ((reg.gain >> 7) & 1) == 0;
+    let is_direct = (reg.gain & 0x80) == 0;
 
     let (rate, step) = if is_direct {        
-        (31, (reg.gain as i16 & 0b0111_1111) * 16)
+        (None, (reg.gain as i16 & 0b0111_1111) * 16)
     } else {
         let rate = reg.gain & 0x1F;
         let step = match get_gain_mode(reg.gain) {
@@ -127,26 +139,23 @@ fn update_envelope_with_gain(env: &Envelope, reg: &DSPRegister) -> (Option<usize
             GainMode::BentIncrease => if env.level < 0x600 { 32 } else { 8 }
         };
     
-        (rate, step)
+        (Some(rate as usize), step)
     };
 
-    (Some(rate as usize), step)
+    (rate, step)
 }
 
-fn is_require_renew(counter: u16, rate: Option<usize>) -> bool {
-    match rate {
-        None => true,
-        Some(rate) => ((counter + COUNTER_OFFSETS[rate]) % ADSR_GAIN_RATES[rate]) == 0,
-    }    
+fn is_require_renew(counter: u16, rate: usize) -> bool {            
+    ((counter + COUNTER_OFFSETS[rate]) % ADSR_GAIN_RATES[rate]) == 0    
 }
 
 fn clip_level(current: i16, step: i16) -> i16 {
     let new_level = (current as i32) + (step as i32);
     
     let level = 
-        if new_level < 0 { 0 }
+        if      new_level < 0     { 0 }
         else if new_level > 0x7ff { 0x7ff }
-        else { new_level };
+        else                      { new_level };
 
     level as i16
 }
@@ -162,11 +171,11 @@ fn get_gain_mode(flag: u8) -> GainMode {
 }
 
 fn refresh_mode(env: i16, reg: &DSPRegister, current: ADSRMode) -> ADSRMode {
-    let boundary = (((reg.adsr >> 13) & 7) + 1) * 0x100;
+    let boundary = (((reg.adsr >> 13) & 0b111) + 1) * 0x100;
 
     match current {
         ADSRMode::Attack if env >= 0x7E0 =>  ADSRMode::Decay,
-        ADSRMode::Decay  if env <= boundary as i16 => ADSRMode::Sustain,
+        ADSRMode::Decay  if env <= (boundary as i16) => ADSRMode::Sustain,
         others => others,
     }
 }

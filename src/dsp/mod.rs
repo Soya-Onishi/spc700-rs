@@ -121,11 +121,10 @@ impl DSPRegister {
     pub fn new_with_init(idx: usize, regs: &[u8; 128]) -> DSPRegister {
         let upper = (idx as u8) << 4;
         let addr = |idx: u8| -> usize { (upper | idx) as usize };
-        let bit  = |idx: u8, data: u8| -> bool { (data & (1 << idx)) > 0 };
+        let bit  = |idx: u8, data: u8| -> bool { (data & (1 << idx)) != 0 };
 
         let pitch = ((regs[addr(3)] as u16) << 8) | (regs[addr(2)] as u16);
-        let adsr  = ((regs[addr(6)] as u16) << 8) | (regs[addr(5)] as u16);
-        
+        let adsr  = ((regs[addr(6)] as u16) << 8) | (regs[addr(5)] as u16);        
         
         DSPRegister {
             vol_left: regs[addr(0)],
@@ -211,7 +210,7 @@ impl DSP {
     }
 
     pub fn new_with_init(regs: &[u8; 128]) -> DSP {
-        let blocks = (0..NUMBER_OF_DSP).map(|idx| DSPBlock::new_with_init(idx, regs)).collect::<Vec<DSPBlock>>();        
+        let blocks: Vec<DSPBlock> = (0..NUMBER_OF_DSP).map(|idx| DSPBlock::new_with_init(idx, regs)).collect();
         let mut dsp = DSP::new();
 
         // initialized by regs
@@ -241,7 +240,7 @@ impl DSP {
         self.sync_counter += cycle_count
     }
 
-    pub fn flush(&mut self, ram: &Ram) -> () {
+    pub fn flush(&mut self, ram: &Ram) -> () {        
         while self.sync_counter >= 64 {
             self.exec_flush(ram);
             self.sync_counter -= 64;
@@ -569,12 +568,12 @@ impl DSPBlock {
         self.key_on_delay = self.key_on_delay.saturating_sub(1);
 
         // output sample of left and right
-        if self.key_on_delay == 0 {
+        if self.key_on_delay == 0 && self.idx == 1 {
             let left_vol = (self.reg.vol_left as i8) as i32;
             let right_vol = (self.reg.vol_right as i8) as i32;
             self.sample_out = out as i16;
-            self.sample_left = ((out * left_vol) >> 7) as i16;
-            self.sample_right = ((out * right_vol) >> 7) as i16;
+            self.sample_left = ((out * left_vol) >> 6) as i16;
+            self.sample_right = ((out * right_vol) >> 6) as i16;
         } else {
             self.sample_out = 0;
             self.sample_left = 0;
@@ -635,7 +634,7 @@ fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_
         let signed_older = buffer[(base_idx + SAMPLE_BUFFER_SIZE - 2) % SAMPLE_BUFFER_SIZE] as i32 >> 1;
         let shamt = brr_info.shift_amount as i32;
         let sample = if shamt > 12 {
-            (nibble as i32) & !0x07FF // (((nibble as i8) >> 3) as i32) << 12
+            (((nibble as i8) >> 3) as i32) << 12
         } else {
             ((nibble as i32) << shamt) >> 1
         };
@@ -694,10 +693,10 @@ fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], s
         idx as usize
     };
 
-    let factor0 = (gaussian_table::GAUSSIAN_TABLE[0x0FF - base_idx] as i32 * buffer[idx(-3)] as i32) >> 11;
-    let factor1 = (gaussian_table::GAUSSIAN_TABLE[0x1FF - base_idx] as i32 * buffer[idx(-2)] as i32) >> 11;
-    let factor2 = (gaussian_table::GAUSSIAN_TABLE[0x100 + base_idx] as i32 * buffer[idx(-1)] as i32) >> 11;
-    let factor3 = (gaussian_table::GAUSSIAN_TABLE[0x000 + base_idx] as i32 * buffer[idx( 0)] as i32) >> 11;
+    let factor0 = (gaussian_table::GAUSSIAN_TABLE[0x0FF - base_idx] as i32 * buffer[idx(-3)] as i32) >> 10;
+    let factor1 = (gaussian_table::GAUSSIAN_TABLE[0x1FF - base_idx] as i32 * buffer[idx(-2)] as i32) >> 10;
+    let factor2 = (gaussian_table::GAUSSIAN_TABLE[0x100 + base_idx] as i32 * buffer[idx(-1)] as i32) >> 10;
+    let factor3 = (gaussian_table::GAUSSIAN_TABLE[0x000 + base_idx] as i32 * buffer[idx( 0)] as i32) >> 10;
 
     let out = factor0;
     let out = out + factor1;
@@ -708,7 +707,7 @@ fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], s
         else if out < -0x8000 { -0x8000 }
         else { out };
     
-    (out & !1) as i16
+    (out >> 1) as i16
 }
 
 // TODO: need echo accumulate implementation

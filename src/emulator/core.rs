@@ -70,12 +70,12 @@ impl Spc700 {
         }
     }
 
-    pub fn next_sample(&mut self) -> (i16, i16) {
-        let before_cycle = self.cycle_counter;
-
-        while (self.cycle_counter - before_cycle) < 64 {
+    pub fn next_sample(&mut self) -> (i16, i16) {        
+        while self.cycle_counter <= 64{
             self.clock();
         }
+
+        self.cycle_counter -= 64;
 
         (self.dsp.sample_left_out(), self.dsp.sample_right_out())
     }
