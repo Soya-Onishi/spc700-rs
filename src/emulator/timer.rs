@@ -5,7 +5,7 @@ pub struct Timer {
   max_cycle: u16,
   pub divided: u16,
   // next_divider: u8,
-  divider: u8,
+  pub divider: u8,
   pub out: u8,
 }
 
@@ -26,7 +26,15 @@ impl Timer {
       divider: 0,
       out: 0,
     }
-  }  
+  }
+
+  pub fn new_with_init(hz: u32, divider: u8, out: u8) -> Timer {
+    let mut timer = Timer::new(hz);
+    timer.divider = divider;
+    timer.out = out;
+
+    timer
+  }
 
   pub fn cycles(&mut self, cycle: u16) -> () {
     if self.enable {

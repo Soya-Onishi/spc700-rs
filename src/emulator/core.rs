@@ -25,7 +25,19 @@ impl Spc700 {
         let spc = Spc::load(path)?;
         let ram = Ram::new_with_init(&spc.ram, &spc.ipl_rom);
         let dsp = DSP::new_with_init(&spc.regs);
-        let mut timer = [8000, 8000, 64000].iter().map(|&hz| Timer::new(hz)).collect::<Vec<Timer>>();
+
+        let divider0 = spc.ram[0x00FA];
+        let divider1 = spc.ram[0x00FB];
+        let divider2 = spc.ram[0x00FC];
+        let timer_out0 = spc.ram[0x00FD];
+        let timer_out1 = spc.ram[0x00FE];
+        let timer_out2 = spc.ram[0x00FF];
+
+        let mut timer: Vec<Timer> = [8000, 8000, 64000].iter()
+            .zip([(divider0, timer_out0), (divider1, timer_out1), (divider2, timer_out2)].iter())
+            .map(|(&hz, &(divider, out))| Timer::new_with_init(hz, divider, 0))
+            .collect();
+
         let control = spc.ram[0x00F1]; 
         timer.iter_mut().zip(0..3).for_each(|(timer, idx)| {
             let enable = (control & (1 << idx)) > 0;
@@ -69,6 +81,11 @@ impl Spc700 {
     }
 
     fn clock(&mut self) -> () {
+        if self.is_stopped {
+            self.cycles(2);
+            return;
+        }
+
         static mut ALL_CYCLE: u64 = 0;
         let before_cycle = self.cycle_counter;
 
@@ -79,7 +96,7 @@ impl Spc700 {
         unsafe {
             // println!("[{:#08x}] opcode: {:#04x}, pc: {:#06x}, a: {:#04x}, x: {:#04x}, y: {:#04x}, sp: {:#04x}, psw: {:#010b}", ALL_CYCLE, opcode, pc, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());            
             let timer = &self.timer[0];
-            // println!("enable: {}, cycle: {:#06x}, out: {:#03x}, divided: {:#06x}", timer.enable, timer.cycle_counter, timer.out, timer.divided)
+            // println!("enable: {}, cycle: {:#06x}, out: {:#03x}, divided: {:#06x}, divider: {:#04x}", timer.enable, timer.cycle_counter, timer.out, timer.divided, timer.divider)
         }
         
         let (upper, lower) = (opcode >> 4, opcode & 0xF);
@@ -203,8 +220,8 @@ impl Spc700 {
                     other => panic!("upper / 2 must be between 0 to 7, actual {:#04x}", other),
                 };
             }
-            (  0x1, 0xA) => self.inc_dec_word(dec_word),
-            (  0x3, 0xA) => self.inc_dec_word(inc_word),
+            (  0x1, 0xA) => self.inc_dec_word(!0),
+            (  0x3, 0xA) => self.inc_dec_word( 1),
             (  0x5, 0xA) => self.cmpw(),
             (  0x7, 0xA) => self.addw(),
             (  0x9, 0xA) => self.subw(),
@@ -462,6 +479,7 @@ impl Spc700 {
         let word = (word_upper << 8) | word_lower;
 
         self.reg.set_ya(word);
+        self.cycles(1);
 
         let is_negative = (word & 0x8000) != 0;
         let is_zero = word == 0;
@@ -486,8 +504,8 @@ impl Spc700 {
 
     fn mov_store_dp_dp(&mut self) -> () {
         let bb = self.read_from_pc();
-        let aa = self.read_from_pc();
         let b = self.read_from_page(bb);
+        let aa = self.read_from_pc();        
         
         self.write_to_page(aa, b);
     }
@@ -639,7 +657,7 @@ impl Spc700 {
         self.cycles(1);
     }
 
-    fn sleep_or_stop(&mut self) -> () {
+    fn sleep_or_stop(&mut self) -> () {        
         self.is_stopped = true;
         self.cycles(2);
     }
@@ -694,9 +712,9 @@ impl Spc700 {
         self.cycles(1);
         let ret = 
             if self.reg.psw.carry() {
-                data & !(1 << bit_idx)
+                data | (1 << bit_idx)                
             } else {
-                data | (1 << bit_idx)
+                data & !(1 << bit_idx)
             };
         
         self.write_ram(addr, ret);        
@@ -1033,15 +1051,11 @@ impl Spc700 {
     }
 
     fn alu_x_idx_indirect(&mut self, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
-        let base_addr = self.read_from_pc().wrapping_add(self.reg.x);
+        let addr = self.read_from_pc().wrapping_add(self.reg.x);
         self.cycles(1);
-
-        let lower = self.read_from_page(base_addr) as u16;
-        let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;
-        let addr = (upper << 8) | lower;
         
         let a = self.reg.a;
-        let b = self.read_ram(addr);        
+        let b = self.read_from_page(addr);        
         let ret = op(&mut self.reg, a, b);
 
         self.reg.a = ret;        
@@ -1150,10 +1164,10 @@ impl Spc700 {
     }
 
     fn alu_dp_dp(&mut self, is_cmp: bool, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
-        let aa = self.read_from_pc();
         let bb = self.read_from_pc();
-        let a = self.read_from_page(aa);
         let b = self.read_from_page(bb);
+        let aa = self.read_from_pc();        
+        let a = self.read_from_page(aa);
 
         let ret = op(&mut self.reg, a, b);
 
@@ -1325,23 +1339,26 @@ impl Spc700 {
         self.reg.psw.set_carry(ret >= 0);
     }
 
-    fn inc_dec_word(&mut self, op: impl Fn(u16) -> u16) -> () {
+    fn inc_dec_word(&mut self, x: u16) -> () {
         let addr = self.read_from_pc();
-        let word_lower = self.read_from_page(addr) as u16;
-        let word_upper = self.read_from_page(addr.wrapping_add(1)) as u16;
-        let word = (word_upper << 8) | word_lower;
-        let ret = op(word);
-        let ret_lower = ret as u8;
-        let ret_upper = (ret >> 8) as u8;
 
-        self.write_to_page(addr, ret_lower);
-        self.write_to_page(addr.wrapping_add(1), ret_upper);
-        self.reg.psw.set_zero(ret == 0);
-        self.reg.psw.set_sign((ret & 0x8000) != 0);
+        let word_lower = self.read_from_page(addr) as u16;                
+        let lower_result = word_lower.wrapping_add(x); 
+        let lower_carry = lower_result >> 8;
+        self.write_to_page(addr, lower_result as u8);
+
+        let word_upper = self.read_from_page(addr.wrapping_add(1)) as u16;
+        let upper_result = word_upper.wrapping_add(lower_carry);
+        
+        self.write_to_page(addr.wrapping_add(1), upper_result as u8);
+
+        let result = (upper_result << 8) | lower_result;
+        self.reg.psw.set_zero(result == 0);
+        self.reg.psw.set_sign((result & 0x8000) != 0);
     }
 
     fn div(&mut self) -> () {
-        self.cycles(12);
+        self.cycles(11);
         let ya = self.reg.ya();
         let x = self.reg.x as u16;
 
@@ -1422,9 +1439,10 @@ impl Spc700 {
         let data = self.read_ram(addr);
         let ret = data & !self.reg.a;
         
+        self.read_ram(addr);
         let cmp = self.reg.a.wrapping_sub(data);
         self.reg.psw.set_zero(cmp == 0);
-        self.reg.psw.set_sign((cmp & 0x80) != 0);
+        self.reg.psw.set_sign((cmp & 0x80) != 0);        
 
         self.write_ram(addr, ret);
 
@@ -1437,9 +1455,10 @@ impl Spc700 {
         let data = self.read_ram(addr);
         let ret = data | self.reg.a;
 
+        self.read_ram(addr);
         let cmp = self.reg.a.wrapping_sub(data);
         self.reg.psw.set_zero(cmp == 0);
-        self.reg.psw.set_sign((cmp & 0x80) != 0);
+        self.reg.psw.set_sign((cmp & 0x80) != 0);        
 
         self.write_ram(addr, ret);
     }
@@ -1466,7 +1485,7 @@ impl Spc700 {
         let data = self.ram.read(addr, &mut self.dsp, &mut self.timer);
 
         if addr != 0x00F3 {
-            // println!("[ read ram] addr: {:#06x}, data: {:#04x}", addr, data);
+           // println!("[ read ram] addr: {:#06x}, data: {:#04x}", addr, data);
         }
         
         data        

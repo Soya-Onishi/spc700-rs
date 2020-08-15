@@ -340,7 +340,7 @@ impl DSP {
             (upper, 0xE) => self.unused_e[upper],
             (upper, 0xF) => self.blocks[upper].reg.echo_filter,
             _ => panic!(format!("{:#06x} is not unexpected address", addr)),
-        }
+        }        
     }
 
     pub fn write_to_register(&mut self, addr: usize, data: u8, ram: &Ram) -> () {                

@@ -94,14 +94,14 @@ fn update_envelope_with_adsr(env: &Envelope, reg: &DSPRegister) -> (Option<usize
             let rate = (decay_rate << 1) + 16;
             // fullsnes say -(((env.level as i16 - 1) >> 8) + 1);
             // but snes9x implement like below
-            let step = -((env.level as i16 - 1) >> 8);
+            let step = -(((env.level as i16 - 1) >> 8) + 1);
 
             (rate, step)
         }
         ADSRMode::Sustain => {
             let rate = (reg.adsr >> 8) & 0b11111;
             // like above comment
-            let step = -((env.level as i16 - 1) >> 8);
+            let step = -(((env.level as i16 - 1) >> 8) + 1);
 
             (rate, step)
         }
@@ -122,7 +122,7 @@ fn update_envelope_with_gain(env: &Envelope, reg: &DSPRegister) -> (Option<usize
         let rate = reg.gain & 0x1F;
         let step = match get_gain_mode(reg.gain) {
             GainMode::LinearDecrease => -32,
-            GainMode::ExpDecrease => -((env.level as i16 - 1) >> 8), // same as above comment
+            GainMode::ExpDecrease => -(((env.level as i16 - 1) >> 8) + 1), // same as above comment
             GainMode::LinearIncrease => 32,
             GainMode::BentIncrease => if env.level < 0x600 { 32 } else { 8 }
         };

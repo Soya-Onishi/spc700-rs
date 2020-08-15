@@ -145,7 +145,6 @@ impl Ram {
             0x0000..=0x00EF => self.ram[addr as usize] = data,         // RAM (typically used for CPU pointers/variables)
             0x00F0..=0x00FF => self.write_to_io(addr as usize, data, dsp, timer),  // I/O Ports (writes are also passed to RAM)
             0x0100..=0x01FF => self.ram[addr as usize] = data,         // RAM (typically used for CPU stack)
-            0x2140..=0x2143 => (),                                     // Main CPU communication I/O Ports, but there is no functionality in this emulator
             0x0200..=0xFFBF => self.ram[addr as usize] = data,         // RAM (code ,data, dir-table, brr-samples, echo-buffer, etc..)
             0xFFC0..=0xFFFF => 
                 if self.rom_writable { 
