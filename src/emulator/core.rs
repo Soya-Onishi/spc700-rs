@@ -16,6 +16,7 @@ pub struct Spc700 {
     pub dsp: DSP,
     pub timer: [Timer; 3],
     pub cycle_counter: u64,
+    total_cycles: u64,
     is_stopped: bool
 }
 
@@ -40,6 +41,7 @@ impl Spc700 {
             dsp: dsp,
             timer: [timer[0], timer[1], timer[2]],            
             cycle_counter: 0,
+            total_cycles: 0,
             is_stopped: false,
         })
     }
@@ -51,6 +53,7 @@ impl Spc700 {
             dsp: DSP::new(),
             timer: [Timer::new(8000), Timer::new(8000), Timer::new(64000)],            
             cycle_counter: 0,
+            total_cycles: 0,
             is_stopped: false,
         }
     }
@@ -291,10 +294,9 @@ impl Spc700 {
             (upper, lower) => panic!("invalid parsed opcode. upper: {:#04x}, lower: {:#04x}", upper, lower),
         }
 
-        self.dsp.flush(&mut self.ram);  // flush in force                
-        unsafe {
-            ALL_CYCLE += self.cycle_counter - before_cycle;
-        }    
+        self.dsp.flush(&mut self.ram);  // flush in force                        
+        self.total_cycles += self.cycle_counter - before_cycle;
+        
     }
 
     fn mov_reg_imm(&mut self, to: u8) -> () {

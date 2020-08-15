@@ -122,6 +122,8 @@ impl Ram {
     }
 
     fn read_from_io(&mut self, addr: usize, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {
+        dsp.flush(self);
+
         match addr {
             0x00F0 => 0, // self.ram[addr], // test is write only
             0x00F1 => 0, // self.ram[addr], // control is write only
@@ -153,6 +155,8 @@ impl Ram {
     }
 
     fn write_to_io(&mut self, addr: usize, data: u8, dsp: &mut DSP, timer: &mut [Timer; 3]) -> () {
+        dsp.flush(self);
+
         match addr {
             0x00F0 => self.write_to_test(data),
             0x00F1 => self.write_to_control(data, timer), 
