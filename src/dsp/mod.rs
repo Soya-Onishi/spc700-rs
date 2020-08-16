@@ -624,6 +624,7 @@ impl DSPBlock {
         self.require_next = require_next_block;
         self.is_loop = self.brr_info.end == BRREnd::Loop;                              
         self.envelope = env;
+        self.reg.key_off = false;
         
         // renew buffer 
         if self.key_on_delay == 0 {

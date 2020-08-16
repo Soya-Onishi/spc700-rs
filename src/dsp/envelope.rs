@@ -83,18 +83,18 @@ impl Envelope {
         let new_level = clip_level(self.level as i16, step);
         let new_mode = refresh_mode(new_level, &dsp.reg, self.adsr_mode);
         
-        match rate {
-            None => {                                
-                Envelope::new(step, step, new_mode)
-            },
-            Some(rate) => {
+        let level = match rate {
+            None => step,
+            Some(rate) => {            
                 if is_require_renew(cycle_count, rate) {  
-                    Envelope::new(new_level, new_level, new_mode)
+                    new_level
                 } else {
-                    Envelope::new(self.level, new_level, new_mode)
+                    self.level
                 }
             },
-        }        
+        };
+
+        Envelope::new(level, new_level, new_mode)
     }    
 }
 
@@ -110,13 +110,13 @@ fn update_envelope_with_adsr(env: &Envelope, reg: &DSPRegister) -> (Option<usize
         ADSRMode::Decay => {
             let decay_rate = (reg.adsr >> 4) & 0b0111;
             let rate = (decay_rate << 1) + 16;
-            let step = -((env.level as i16 - 1) >> 8);
+            let step = -(((env.level as i16 - 1) >> 8) + 1);
 
             (rate, step)
         }
         ADSRMode::Sustain => {
             let rate = (reg.adsr >> 8) & 0b11111;
-            let step = -((env.level as i16 - 1) >> 8);
+            let step = -(((env.level as i16 - 1) >> 8) + 1);
 
             (rate, step)
         }
@@ -137,7 +137,7 @@ fn update_envelope_with_gain(env: &Envelope, reg: &DSPRegister) -> (Option<usize
         let rate = reg.gain & 0x1F;
         let step = match get_gain_mode(reg.gain) {
             GainMode::LinearDecrease => -32,
-            GainMode::ExpDecrease => -((env.level - 1) >> 8), // same as above comment
+            GainMode::ExpDecrease => -(((env.level - 1) >> 8) + 1), // same as above comment
             GainMode::LinearIncrease => 32,
             GainMode::BentIncrease => if env.hidden_level < 0x600 { 32 } else { 8 }
         };
