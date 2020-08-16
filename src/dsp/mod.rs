@@ -39,7 +39,7 @@ pub struct DSP {
 
     // global dsp counter
     counter: u16,    
-    sync_counter: u16,
+    pub sync_counter: u16,
     
     // These registers are unused in DSP.    
     unused_a: [u8; 8], 
@@ -262,7 +262,10 @@ impl DSP {
                 let loop1 = ram.ram[tab_addr + 3] as u16;
 
                 blk.pitch_counter = 0x0000;
+                
                 blk.buffer = [0; SAMPLE_BUFFER_SIZE];
+                blk.base_idx = 0;
+
                 blk.start_addr = start0 | (start1 << 8);                
                 blk.loop_addr = loop0 | (loop1 << 8);
                 blk.src_addr = blk.start_addr;
@@ -283,10 +286,10 @@ impl DSP {
                 let addr = blk.src_addr as usize;                
                 let brr_block = &ram.ram[addr..addr + 9];                
 
+                blk.base_idx = (blk.base_idx + 16) % SAMPLE_BUFFER_SIZE;
                 blk.brr_info = BRRInfo::new(brr_block[0]);
                 blk.brr_nibbles = Vec::from(&brr_block[1..]);          
-                generate_new_sample(&blk.brr_nibbles, &mut blk.buffer, &blk.brr_info, blk.base_idx);
-                blk.base_idx = (blk.base_idx + 16) % SAMPLE_BUFFER_SIZE;
+                generate_new_sample(&blk.brr_nibbles, &mut blk.buffer, &blk.brr_info, blk.base_idx);                
             }
                                                 
             blk.flush(before_out, soft_reset, cycle_counter);
@@ -508,17 +511,15 @@ impl DSPBlock {
 
         // fetch brr nibbles 
         let brr_info = &self.brr_info;
-
-        // generate sample
-        let nibble_idx = ((self.pitch_counter >> 12) & 0xF) as usize;                
-
+        
         // calculate related pitch
         let step = generate_additional_pitch(&self.reg, before_out);
         let (next_pitch, require_next_block) = self.pitch_counter.overflowing_add(step);        
         
         // filter sample
+        let nibble_idx = ((self.pitch_counter >> 12) & 0x0F) as i8;
         let gaussian_idx = (next_pitch >> 4) & 0xFF;
-        let filtered_sample = gaussian_interpolation(gaussian_idx as usize, &self.buffer, self.base_idx + nibble_idx);        
+        let sample = gaussian_interpolation(gaussian_idx as usize, &self.buffer, self.base_idx as i8 + nibble_idx);        
 
         // envelope        
         let is_brr_end = brr_info.end == BRREnd::Mute;        
@@ -540,7 +541,7 @@ impl DSPBlock {
         let env = 
             if self.key_on_delay > 0 { envelope }
             else { envelope.envelope(self, cycle_counter) };
-        let out = ((filtered_sample as i32) * (env.level as i32)) >> 11; // envelope bit width is 11, so dividing 2^11.
+        let out = ((sample as i32) * (env.level as i32)) >> 11; // envelope bit width is 11, so dividing 2^11.
 
         //
         // POST PROCESS
@@ -568,7 +569,7 @@ impl DSPBlock {
         self.key_on_delay = self.key_on_delay.saturating_sub(1);
 
         // output sample of left and right
-        if self.key_on_delay == 0 && self.idx == 1 {
+        if self.key_on_delay == 0 {
             let left_vol = (self.reg.vol_left as i8) as i32;
             let right_vol = (self.reg.vol_right as i8) as i32;
             self.sample_out = out as i16;
@@ -586,8 +587,8 @@ impl DSPBlock {
 
 impl BRRInfo {
     pub fn new(format: u8) -> BRRInfo {
-        let shift_amount = (format >> 4) & 0xF;
-        let filter = match (format >> 2) & 0x3 {
+        let shift_amount = (format >> 4) & 0x0F;
+        let filter = match (format >> 2) & 0b11 {
             0 => FilterType::NoFilter,
             1 => FilterType::UseOld,
             2 => FilterType::UseAll0,
@@ -595,11 +596,11 @@ impl BRRInfo {
             _ => panic!("filter value should be between 0 to 3"),
         };
 
-        let end = match format & 3 {
+        let end = match format & 0b11 {
             0 | 2 => BRREnd::Normal,
-            1 => BRREnd::Mute,
-            3 => BRREnd::Loop,
-            _ => panic!("end range should be between 0 to 3"),
+            1     => BRREnd::Mute,
+            3     => BRREnd::Loop,
+            _     => panic!("end range should be between 0 to 3"),
         };
 
         BRRInfo {
@@ -615,7 +616,7 @@ impl BRRInfo {
 }
 
 fn fetch_brr_nibble(nibbles: &[u8], idx: usize) -> i8 {
-    let two_nibbles = nibbles[idx / 2] as i8;
+    let two_nibbles = nibbles[idx >> 1] as i8;
     let nibble_idx = idx & 1;
     
     if nibble_idx == 0 {
@@ -625,16 +626,16 @@ fn fetch_brr_nibble(nibbles: &[u8], idx: usize) -> i8 {
     }    
 }
 
-fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_info: &BRRInfo, base_idx: usize) -> () {
-    let mut base_idx = base_idx;
+fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_info: &BRRInfo, base_idx: usize) -> () {    
     let nibbles = (0..16).map(|idx| fetch_brr_nibble(brrs, idx));    
     
-    nibbles.for_each(|nibble| {
-        let signed_old = buffer[(base_idx + SAMPLE_BUFFER_SIZE - 1) % SAMPLE_BUFFER_SIZE] as i32;
-        let signed_older = buffer[(base_idx + SAMPLE_BUFFER_SIZE - 2) % SAMPLE_BUFFER_SIZE] as i32 >> 1;
+    nibbles.zip(0..).for_each(|(nibble, idx)| {
+        let signed_old = buffer[(base_idx + idx + SAMPLE_BUFFER_SIZE - 1) % SAMPLE_BUFFER_SIZE] as i32;
+        let signed_older = buffer[(base_idx + idx + SAMPLE_BUFFER_SIZE - 2) % SAMPLE_BUFFER_SIZE] as i32;
+
         let shamt = brr_info.shift_amount as i32;
         let sample = if shamt > 12 {
-            (((nibble as i8) >> 3) as i32) << 12
+            (((nibble as i8) >> 3) as i32) << 11
         } else {
             ((nibble as i32) << shamt) >> 1
         };
@@ -642,17 +643,17 @@ fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_
         let sample = match brr_info.filter {
             FilterType::NoFilter => sample,
             FilterType::UseOld => {
-                let old_filter = (signed_old >> 1) + ((-signed_old) >> 5);
+                let old_filter = signed_old + ((-signed_old) >> 4);
                 sample + old_filter
             }
             FilterType::UseAll0 => {
-                let old_filter = signed_old + ((signed_old * -3) >> 6);
+                let old_filter = (signed_old * 2) + ((signed_old * -3) >> 5);
                 let older_filter = -signed_older + (signed_older >> 4);
 
                 sample + old_filter + older_filter
             }
             FilterType::UseAll1 => {
-                let old_filter = signed_old + ((signed_old * -13) >> 7);
+                let old_filter = (signed_old * 3) + ((signed_old * -13) >> 6);
                 let older_filter = -signed_older + ((signed_older * 3) >> 4);
 
                 sample + old_filter + older_filter
@@ -662,10 +663,10 @@ fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_
         let sample = 
             if sample > 0x7FFF { 0x7FFF }
             else if sample < -0x8000 { -0x8000 }
-            else { sample };
+            else { sample };        
+        let sample = ((sample as i16) << 1) >> 1;       
         
-        buffer[base_idx] = (sample as i16) << 1;
-        base_idx = (base_idx + 1) % SAMPLE_BUFFER_SIZE;
+        buffer[base_idx + idx] = sample;
     });  
 }
 
@@ -676,19 +677,19 @@ fn generate_additional_pitch(reg: &DSPRegister, before_out: Option<i16>) -> u16 
         base_step
     } else {        
         let factor = before_out.unwrap();
-        let factor = factor >> 5;
+        let factor = (factor >> 4) + 0x400;
         let ret = ((base_step as i32) * (factor as i32)) >> 10;
 
-        if ret > 0x3FFF { 0x3FFF }
+        (ret & 0x7FFF) as u16
+/*         if ret > 0x3FFF { 0x3FFF }
         else if ret < 0 { 0 }
-        else            { ret as u16 }
+        else            { ret as u16 } */
     }
 }
 
-fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], sample_idx: usize) -> i16 {    
-    let idx = |i: i8| -> usize {
-        let base_idx = sample_idx as i8;
-        let idx = (base_idx - i + (SAMPLE_BUFFER_SIZE as i8)) % (SAMPLE_BUFFER_SIZE as i8);
+fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], sample_idx: i8) -> i16 {    
+    let idx = |i: i8| -> usize {        
+        let idx = (sample_idx + i + (SAMPLE_BUFFER_SIZE as i8)) % (SAMPLE_BUFFER_SIZE as i8);
 
         idx as usize
     };
@@ -700,14 +701,17 @@ fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], s
 
     let out = factor0;
     let out = out + factor1;
-    let out = out + factor2;
-    let out = out + factor3;
+    let out = out + factor2;    
+    let out = out + factor3;    
     let out = 
         if out > 0x7FFF { 0x7FFF }
         else if out < -0x8000 { -0x8000 }
         else { out };
     
-    (out >> 1) as i16
+    out as i16 >> 1
+    // (out as i16) & !1
+    // out as i16
+    // buffer[idx(0)]
 }
 
 // TODO: need echo accumulate implementation
@@ -721,8 +725,13 @@ fn combine_all_sample(blocks: &Vec<DSPBlock>, dsp: &DSP) -> (i16, i16) {
             else { sum }
         });
 
-        let acc = (acc as i32) * (master_vol as i32) >> 7;
-        if dsp.is_mute { 0 } else { acc as i16 }
+        let out = (acc * (master_vol as i32)) >> 7;
+        let out = 
+            if out > 0x7FFF       { 0x7FFF }
+            else if out < -0x8000 { -0x8000 }
+            else                  { out };
+
+        if dsp.is_mute { 0 } else { out as i16 }
     };
 
     let lefts = blocks.iter().map(|blk| blk.sample_left).collect::<Vec<i16>>();

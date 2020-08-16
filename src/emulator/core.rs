@@ -71,11 +71,15 @@ impl Spc700 {
     }
 
     pub fn next_sample(&mut self) -> (i16, i16) {        
-        while self.cycle_counter <= 64{
+        loop {
+            let before_cycle_count = self.dsp.sync_counter;
             self.clock();
-        }
+            let after_cycle_count = self.dsp.sync_counter;
 
-        self.cycle_counter -= 64;
+            if before_cycle_count > after_cycle_count {
+                break;
+            }
+        }        
 
         (self.dsp.sample_left_out(), self.dsp.sample_right_out())
     }
@@ -94,9 +98,11 @@ impl Spc700 {
         let mut inst = Instruction::decode(opcode);
 
         unsafe {
-            // println!("[{:#08x}] opcode: {:#04x}, pc: {:#06x}, a: {:#04x}, x: {:#04x}, y: {:#04x}, sp: {:#04x}, psw: {:#010b}", ALL_CYCLE, opcode, pc, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());            
-            let timer = &self.timer[0];
-            // println!("enable: {}, cycle: {:#06x}, out: {:#03x}, divided: {:#06x}, divider: {:#04x}", timer.enable, timer.cycle_counter, timer.out, timer.divided, timer.divider)
+            
+                // println!("[{:#08x}] opcode: {:#04x}, pc: {:#06x}, a: {:#04x}, x: {:#04x}, y: {:#04x}, sp: {:#04x}, psw: {:#010b}", ALL_CYCLE, opcode, pc, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());            
+                let timer = &self.timer[0];
+                // println!("enable: {}, cycle: {:#06x}, out: {:#03x}, divided: {:#06x}, divider: {:#04x}", timer.enable, timer.cycle_counter, timer.out, timer.divided, timer.divider);
+            
         }
         
         let (upper, lower) = (opcode >> 4, opcode & 0xF);
@@ -311,9 +317,7 @@ impl Spc700 {
             (upper, lower) => panic!("invalid parsed opcode. upper: {:#04x}, lower: {:#04x}", upper, lower),
         }
 
-        self.dsp.flush(&mut self.ram);  // flush in force                        
-        self.total_cycles += self.cycle_counter - before_cycle;
-        
+        self.dsp.flush(&mut self.ram);  // flush in force                                        
     }
 
     fn mov_reg_imm(&mut self, to: u8) -> () {
@@ -1484,9 +1488,8 @@ impl Spc700 {
         self.cycles(1);
         let data = self.ram.read(addr, &mut self.dsp, &mut self.timer);
 
-        if addr != 0x00F3 {
-           // println!("[ read ram] addr: {:#06x}, data: {:#04x}", addr, data);
-        }
+        
+        // println!("[ read ram] addr: {:#06x}, data: {:#04x}", addr, data);        
         
         data        
     }    
@@ -1504,13 +1507,32 @@ impl Spc700 {
     pub fn write_ram(&mut self, addr: u16, data: u8) -> () {
         self.cycles(1);
         self.ram.write(addr, data, &mut self.dsp, &mut self.timer);
-        // println!("[write ram] addr: {:#06x}, data: {:#04x}", addr, data);
+        
+        // println!("[write ram] addr: {:#06x}, data: {:#04x}", addr, data);        
+        
+        if addr == 0x2140 {
+            // println!("write data: {:#04x}", data);
+        }
     }
 
     pub fn cycles(&mut self, cycle_count: u16) -> () {
+        // static mut IS_ALREADY_OVER1: bool = false;
+        // static mut IS_ALREADY_OVER2: bool = false;
+
         self.dsp.cycles(cycle_count);
         self.timer.iter_mut().for_each(|timer| timer.cycles(cycle_count));
         self.cycle_counter += cycle_count as u64;
+        self.total_cycles += cycle_count as u64;
+
+        /* unsafe {
+            if !IS_ALREADY_OVER1 && self.total_cycles >= 28_672_000 {
+                eprintln!("start record");
+                IS_ALREADY_OVER1 = true;
+            } else if !IS_ALREADY_OVER2 && self.total_cycles >= 36_864_000 {
+                eprintln!("end record");
+                IS_ALREADY_OVER2 = true
+            }
+        } */
     }
 }
 
@@ -1561,6 +1583,20 @@ fn adc(reg: &mut Register, a: u8, b: u8) -> u8 {
     r as u8
 }
 
+fn sbc(reg: &mut Register, a: u8, b: u8) -> u8 {
+    let a = a as i32;
+    let b = b as i32;
+    let r = a - b - !reg.psw.carry() as i32;
+
+    reg.psw.set_sign((r as u8 & 0x80) != 0);
+    reg.psw.set_overflow(((a ^ b) & (a ^ r) & 0x80) != 0);
+    reg.psw.set_half((!(a ^ b ^ r) & 0x10) != 0);
+    reg.psw.set_zero(r as u8 == 0);
+    reg.psw.set_carry(r >= 0);
+
+    r as u8
+}
+
 fn asl(operand: u8, _is_carry: bool) -> (u8, bool) {
     let is_carried = (operand & 0x80) != 0;
     let ret = operand << 1;
@@ -1569,7 +1605,8 @@ fn asl(operand: u8, _is_carry: bool) -> (u8, bool) {
 }
 
 fn rol(operand: u8, is_carry: bool) -> (u8, bool) {
-    let (shifted, is_carried) = operand.overflowing_shl(1);
+    let is_carried = (operand & 0x80) != 0;
+    let shifted = operand << 1;
     let ret = shifted | (is_carry as u8);
 
     (ret, is_carried)
@@ -1588,16 +1625,4 @@ fn ror(operand: u8, is_carry: bool) -> (u8, bool) {
     let carried = (operand & 1) != 0;
 
     (ret, carried)
-}
-
-fn sbc(reg: &mut Register, a: u8, b: u8) -> u8 {
-    adc(reg, a, !b)
-}
-
-fn inc_word(op: u16) -> u16 {
-    op.wrapping_add(1)
-}
-
-fn dec_word(op: u16) -> u16 {
-    op.wrapping_sub(1)
 }

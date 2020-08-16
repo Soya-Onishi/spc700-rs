@@ -76,7 +76,7 @@ impl Ram {
         let control = ram[0x00F1];
         let dsp_addr = ram[0x00F2];
         let ram_writable = (test & 2) > 0;
-        let rom_writable = !((control & 0x80) > 0);
+        let rom_writable = (control & 0x80) == 0;
 
         Ram {
             ram: ram.clone(),
@@ -109,8 +109,7 @@ impl Ram {
         match addr {
             0x0000..=0x00EF => self.ram[addr as usize],         // RAM (typically used for CPU pointers/variables)
             0x00F0..=0x00FF => self.read_from_io(addr as usize, dsp, timer),  // I/O Ports (writes are also passed to RAM)
-            0x0100..=0x01FF => self.ram[addr as usize],         // RAM (typically used for CPU stack)
-            0x2140..=0x2143 => 0,                                     // Main CPU communication I/O Ports, but there is no functionality in this emulator
+            0x0100..=0x01FF => self.ram[addr as usize],         // RAM (typically used for CPU stack)            
             0x0200..=0xFFBF => self.ram[addr as usize],         // RAM (code ,data, dir-table, brr-samples, echo-buffer, etc..)
             0xFFC0..=0xFFFF => 
                 if self.rom_writable { 
@@ -121,9 +120,7 @@ impl Ram {
         }
     }
 
-    fn read_from_io(&mut self, addr: usize, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {
-        dsp.flush(self);
-
+    fn read_from_io(&mut self, addr: usize, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {        
         match addr {
             0x00F0 => 0, // self.ram[addr], // test is write only
             0x00F1 => 0, // self.ram[addr], // control is write only
@@ -146,16 +143,11 @@ impl Ram {
             0x00F0..=0x00FF => self.write_to_io(addr as usize, data, dsp, timer),  // I/O Ports (writes are also passed to RAM)
             0x0100..=0x01FF => self.ram[addr as usize] = data,         // RAM (typically used for CPU stack)
             0x0200..=0xFFBF => self.ram[addr as usize] = data,         // RAM (code ,data, dir-table, brr-samples, echo-buffer, etc..)
-            0xFFC0..=0xFFFF => 
-                if self.rom_writable { 
-                    self.ram[addr as usize] = data;
-                }
+            0xFFC0..=0xFFFF => self.ram[addr as usize] = data,                
         };     
     }
 
-    fn write_to_io(&mut self, addr: usize, data: u8, dsp: &mut DSP, timer: &mut [Timer; 3]) -> () {
-        dsp.flush(self);
-
+    fn write_to_io(&mut self, addr: usize, data: u8, dsp: &mut DSP, timer: &mut [Timer; 3]) -> () {    
         match addr {
             0x00F0 => self.write_to_test(data),
             0x00F1 => self.write_to_control(data, timer), 
