@@ -49,16 +49,25 @@ enum GainMode {
 #[derive(Copy, Clone)]
 pub struct Envelope {
     pub level: i16,    
+    hidden_level: i16,
     pub adsr_mode: ADSRMode,    
 }
 
 impl Envelope {    
-    pub fn new(level: i16, adsr_mode: ADSRMode) -> Envelope {
-        Envelope { level, adsr_mode }
+    pub fn new(level: i16, hidden_level: i16, adsr_mode: ADSRMode) -> Envelope {
+        Envelope { level, hidden_level, adsr_mode }
+    }
+
+    pub fn copy(&self, level: i16, adsr_mode: ADSRMode) -> Envelope {
+        Envelope {
+            level: level,
+            hidden_level: self.hidden_level,
+            adsr_mode: adsr_mode,
+        }
     }
 
     pub fn empty() -> Envelope {
-        Envelope::new(0, ADSRMode::Release)
+        Envelope::new(0, 0, ADSRMode::Release)
     }
 
     pub fn envelope(&self, dsp: &DSPBlock, cycle_count: u16) -> Envelope {
@@ -75,17 +84,14 @@ impl Envelope {
         let new_mode = refresh_mode(new_level, &dsp.reg, self.adsr_mode);
         
         match rate {
-            None => {
-                let vol = (step as i32).wrapping_mul(16);
-                let vol = (vol / 0x800) as i16;
-
-                Envelope::new(vol, new_mode)
+            None => {                                
+                Envelope::new(step, step, new_mode)
             },
             Some(rate) => {
                 if is_require_renew(cycle_count, rate) {  
-                    Envelope::new(new_level, new_mode)
+                    Envelope::new(new_level, new_level, new_mode)
                 } else {
-                    Envelope::new(self.level, new_mode)
+                    Envelope::new(self.level, new_level, new_mode)
                 }
             },
         }        
@@ -126,14 +132,14 @@ fn update_envelope_with_gain(env: &Envelope, reg: &DSPRegister) -> (Option<usize
     let is_direct = (reg.gain & 0x80) == 0;
 
     let (rate, step) = if is_direct {        
-        (None, (reg.gain as i16 & 0b0111_1111) * 16)
+        (None, (reg.gain as i16 & 0b0111_1111).wrapping_mul(0x10))
     } else {
         let rate = reg.gain & 0x1F;
         let step = match get_gain_mode(reg.gain) {
             GainMode::LinearDecrease => -32,
-            GainMode::ExpDecrease => -((env.level as i16 - 1) >> 8), // same as above comment
+            GainMode::ExpDecrease => -((env.level - 1) >> 8), // same as above comment
             GainMode::LinearIncrease => 32,
-            GainMode::BentIncrease => if env.level < 0x600 { 32 } else { 8 }
+            GainMode::BentIncrease => if env.hidden_level < 0x600 { 32 } else { 8 }
         };
     
         (Some(rate as usize), step)

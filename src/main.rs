@@ -112,7 +112,7 @@ fn play_by_hound(emu: Spc700) -> ! {
     };
 
     let mut writer = hound::WavWriter::create("test.wav", spec).expect("fatal error occurred when wav writer is instantiated");
-    let seconds = 10;
+    let seconds = 120;
     let sample_rate = 32000;
     let mut emu = emu;
     for _ in 0 .. sample_rate * seconds {
