@@ -26,13 +26,17 @@ pub struct DSP {
 
     // FLG register    
     noise_frequency: u8,
-    echo_buffer_disable: bool,
+    echo_buffer_enable: bool,
     is_mute: bool,
     soft_reset: bool,
-
+    
     echo_feedback_volume: u8,
-    echo_ring_buffer_addr: u8,
+    echo_ring_buffer_addr: u16,
     echo_buffer_size: u8,
+    echo_pos: u16,
+    echo_buf_length: u16,
+    fir_left: FIR,
+    fir_right: FIR,
 
     sample_left_out: i16,
     sample_right_out: i16,
@@ -69,6 +73,8 @@ pub struct DSPBlock {
     sample_out: i16,
     sample_left: i16,
     sample_right: i16,
+    echo_left: i16,
+    echo_right: i16,
 
     key_on_delay: u8,
 }
@@ -81,8 +87,7 @@ pub struct DSPRegister {
     pub adsr: u16,
     pub gain: u8,
     pub env: u8,
-    pub out: u8,
-    pub echo_filter: u8,    
+    pub out: u8,  
     
     pub key_on: bool,
     pub key_on_is_modified: bool, 
@@ -105,7 +110,6 @@ impl DSPRegister {
             gain: 0,
             env: 0,
             out: 0,
-            echo_filter: 0,
 
             key_on: false,
             key_on_is_modified: false,        
@@ -124,7 +128,7 @@ impl DSPRegister {
         let bit  = |idx: u8, data: u8| -> bool { (data & (1 << idx)) != 0 };
 
         let pitch = ((regs[addr(3)] as u16) << 8) | (regs[addr(2)] as u16);
-        let adsr  = ((regs[addr(6)] as u16) << 8) | (regs[addr(5)] as u16);        
+        let adsr  = ((regs[addr(6)] as u16) << 8) | (regs[addr(5)] as u16);   
         
         DSPRegister {
             vol_left: regs[addr(0)],
@@ -135,7 +139,6 @@ impl DSPRegister {
             gain: regs[addr(7)],
             env:  regs[addr(8)],
             out:  regs[addr(9)],
-            echo_filter: regs[addr(0xF)],
             
             key_on: bit(idx as u8, regs[0x4C]),
             key_on_is_modified: bit(idx as u8, regs[0x4C]),
@@ -170,6 +173,43 @@ enum BRREnd {
     Loop,
 }
 
+struct FIR {
+    regs: [i16; 8],    
+    filter: [i16; 8],
+}
+
+impl FIR {
+    pub fn new() -> FIR {
+        FIR {
+            regs: [0; 8],
+            filter: [0; 8],
+        }
+    }
+
+    pub fn new_with_init(filter: [i16; 8]) -> FIR {
+        FIR {
+            regs: [0; 8],
+            filter: filter,
+        }
+    }
+
+    pub fn next(&mut self, value: i16) -> i16 {
+        let mut new_regs = [0; 8];
+        self.regs[1..].iter().zip(0..).for_each(|(&v, idx)| new_regs[idx] = v);
+        new_regs[7] = value;
+
+        let ret = new_regs.iter().zip(self.filter.iter())
+            .map(|(&value, &filter)| ((value as i32) * (filter as i32)) >> 7)
+            .fold(0, |acc, value| { acc + value });
+
+        self.regs = new_regs;        
+        
+        if ret > 0x7FFF       {  0x7FFF }
+        else if ret < -0x8000 { -0x8000 }
+        else                  { ret as i16 }
+    }
+}
+
 impl DSP {
     pub fn new() -> DSP {
         let blocks = (0..NUMBER_OF_DSP).map(|idx| DSPBlock::new(idx)).collect::<Vec<DSPBlock>>();
@@ -185,13 +225,17 @@ impl DSP {
             flag_is_modified: false,            
 
             noise_frequency: 0,
-            echo_buffer_disable: true,
+            echo_buffer_enable: false,
             is_mute: true,
             soft_reset: true,
 
             echo_feedback_volume: 0,
             echo_ring_buffer_addr: 0,
             echo_buffer_size: 0,
+            echo_buf_length: 0,
+            echo_pos: 0,
+            fir_left: FIR::new(),
+            fir_right: FIR::new(),
 
             sample_left_out: 0,
             sample_right_out: 0,
@@ -225,14 +269,22 @@ impl DSP {
 
         let flag = regs[0x6C];
         dsp.noise_frequency = flag & 0x1F;
-        dsp.echo_buffer_disable = (flag & 0x20) > 0;
+        dsp.echo_buffer_enable = (flag & 0x20) == 0;
         dsp.is_mute = (flag & 0x40) > 0;
         dsp.soft_reset = (flag & 0x80) > 0;
 
         dsp.echo_feedback_volume = regs[0x0D];
-        dsp.echo_ring_buffer_addr = regs[0x6D];
+        dsp.echo_ring_buffer_addr = (regs[0x6D] as u16) << 8;
         dsp.echo_buffer_size = regs[0x7D];
         
+        let mut fir_coefficients = [0; 8];
+        (0..8).map(|upper: usize| regs[(upper << 4) | 0x0F])
+            .map(|v| (v as i8) as i16 )
+            .zip(0..).for_each(|(v, idx)| fir_coefficients[idx] = v);
+
+        dsp.fir_left = FIR::new_with_init(fir_coefficients.clone());
+        dsp.fir_right = FIR::new_with_init(fir_coefficients.clone());
+
         dsp
     }
 
@@ -240,14 +292,14 @@ impl DSP {
         self.sync_counter += cycle_count
     }
 
-    pub fn flush(&mut self, ram: &Ram) -> () {        
+    pub fn flush(&mut self, ram: &mut Ram) -> () {        
         while self.sync_counter >= 64 {
             self.exec_flush(ram);
             self.sync_counter -= 64;
         }
     }
 
-    fn exec_flush(&mut self, ram: &Ram) -> () {        
+    fn exec_flush(&mut self, ram: &mut Ram) -> () {        
         let table_addr = self.table_addr as u16;
         let soft_reset = self.soft_reset && self.flag_is_modified;
         let cycle_counter = self.counter;            
@@ -295,14 +347,25 @@ impl DSP {
             Some(blk.sample_out)
         });
 
-        let (left, right) = combine_all_sample(&self.blocks, self);
+        let (left, right) = combine_all_sample(&self.blocks, self);         
+        let (echo_left, echo_right) = combine_echo(&self.blocks);        
+        let (left_echo, right_echo) = echo_process(echo_left, echo_right, self, ram);
+
+        let left_out = (left as i32) + (left_echo as i32);
+        let right_out = (right as i32) + (right_echo as i32);
+        let clamp = |v: i32| -> i16 {
+            if v > 0x7FFF { 0x7FFF }
+            else if v < -0x8000 { -0x8000 }
+            else { v as i16 }
+        };        
+        
         self.flag_is_modified = false;
         self.counter = (self.counter + 1) % CYCLE_RANGE;
-        self.sample_left_out = left;
-        self.sample_right_out = right;
+        self.sample_left_out = clamp(left_out);
+        self.sample_right_out = clamp(right_out);
     }
 
-    pub fn read_from_register(&mut self, addr: usize, ram: &Ram) -> u8 {
+    pub fn read_from_register(&mut self, addr: usize, ram: &mut Ram) -> u8 {
         self.flush(ram);
 
         let upper_base = (addr >> 4) & 0xF;
@@ -336,15 +399,15 @@ impl DSP {
             (  0x3, 0xD) => vec_to_u8(self.blocks.iter().map(|blk| blk.reg.noise_enable).collect()),
             (  0x4, 0xD) => vec_to_u8(self.blocks.iter().map(|blk| blk.reg.echo_enable).collect()),
             (  0x5, 0xD) => self.table_addr,
-            (  0x6, 0xD) => self.echo_ring_buffer_addr,
+            (  0x6, 0xD) => (self.echo_ring_buffer_addr >> 8) as u8,
             (  0x7, 0xD) => self.echo_buffer_size,
             (upper, 0xE) => self.unused_e[upper],
-            (upper, 0xF) => self.blocks[upper].reg.echo_filter,
+            (upper, 0xF) => self.fir_left.filter[upper] as u8,         
             _ => panic!(format!("{:#06x} is not unexpected address", addr)),
         }                
     }
 
-    pub fn write_to_register(&mut self, addr: usize, data: u8, ram: &Ram) -> () {                
+    pub fn write_to_register(&mut self, addr: usize, data: u8, ram: &mut Ram) -> () {                
         self.flush(ram);
 
         let upper = (addr >> 4) & 0x0F;
@@ -404,13 +467,13 @@ impl DSP {
             }
             (  0x6, 0xC) => {
                 let noise_frequency = data & 0x1F;
-                let echo_buffer_disable = (data & 0x20) > 0;
+                let echo_buffer_enable = (data & 0x20) == 0;
                 let is_mute = (data & 0x40) > 0;
                 let soft_reset = (data & 0x80) > 0;
 
                 self.flag_is_modified = true;
                 self.noise_frequency = noise_frequency;
-                self.echo_buffer_disable = echo_buffer_disable;
+                self.echo_buffer_enable = echo_buffer_enable;
                 self.is_mute = is_mute;
                 self.soft_reset = soft_reset;
             }
@@ -436,10 +499,13 @@ impl DSP {
                 });
             }
             (  0x5, 0xD) => self.table_addr = data,
-            (  0x6, 0xD) => self.echo_ring_buffer_addr = data,
+            (  0x6, 0xD) => self.echo_ring_buffer_addr = (data as u16) << 8,
             (  0x7, 0xD) => self.echo_buffer_size = data,      
             (upper, 0xE) => self.unused_e[upper] = data,
-            (upper, 0xF) => self.blocks[upper].reg.echo_filter = data,
+            (upper, 0xF) => {
+                self.fir_left.filter[upper] = (data as i8) as i16;
+                self.fir_right.filter[upper] = (data as i8) as i16; 
+            }
             _ => panic!(format!("{:#06x} is not expected address", addr)),
         }
     }
@@ -451,7 +517,7 @@ impl DSP {
             blk.reg.out = 0;            
         });
 
-        self.echo_buffer_disable = true;
+        self.echo_buffer_enable = false;
         self.is_mute = true;        
         self.soft_reset = true;
     }
@@ -459,7 +525,7 @@ impl DSP {
     #[allow(non_snake_case)]
     fn read_FLG(&self) -> u8 {
         let noise_freq = self.noise_frequency;
-        let echo_buffer_disable = (self.echo_buffer_disable as u8) << 5;
+        let echo_buffer_disable = (!self.echo_buffer_enable as u8) << 5;
         let is_mute = (self.is_mute as u8) << 6;
         let soft_reset = (self.soft_reset as u8) << 7;
 
@@ -493,6 +559,8 @@ impl DSPBlock {
             sample_out: 0,
             sample_left: 0,
             sample_right: 0,
+            echo_left: 0,
+            echo_right: 0,
 
             key_on_delay: 0,
         }
@@ -571,16 +639,20 @@ impl DSPBlock {
         if self.key_on_delay == 0 {
             let left_vol = (self.reg.vol_left as i8) as i32;
             let right_vol = (self.reg.vol_right as i8) as i32;
+            
             self.sample_out = out as i16;
             self.sample_left = ((out * left_vol) >> 6) as i16;
             self.sample_right = ((out * right_vol) >> 6) as i16;
+            
+            self.echo_left = if self.reg.echo_enable { self.sample_left } else { 0 };
+            self.echo_right = if self.reg.echo_enable { self.sample_right } else { 0 };
         } else {
             self.sample_out = 0;
             self.sample_left = 0;
             self.sample_right = 0;
-        }
-        
-        // if self.idx == 7 { println!("[pitch counter] {:#06x}, {:#06x}", self.pitch_counter, step); }
+            self.echo_left = 0;
+            self.echo_right = 0;
+        }            
     }
 }
 
@@ -739,6 +811,68 @@ fn combine_all_sample(blocks: &Vec<DSPBlock>, dsp: &DSP) -> (i16, i16) {
     let right = f(rights, dsp.master_vol_right as i8);
 
     (left, right)
+}
+
+fn combine_echo(blocks: &Vec<DSPBlock>) -> (i16, i16) {
+    let f = |samples: Vec<i16>| -> i32 {
+        samples.iter().fold(0, |acc, &sample| {
+            let sum = acc + (sample as i32);
+
+            if sum > 0x7FFF       { 0x7FFF }
+            else if sum < -0x8000 { -0x8000 }
+            else                  { sum }
+        })
+    };
+
+    let lefts: Vec<i16> = blocks.iter().map(|blk| blk.echo_left).collect();
+    let rights: Vec<i16> = blocks.iter().map(|blk| blk.echo_right).collect();
+    let left = f(lefts);
+    let right = f(rights);
+
+    (left as i16, right as i16)
+}
+
+fn echo_process(left: i16, right: i16, dsp: &mut DSP, ram: &mut Ram) -> (i16, i16) {    
+    let buffer_addr = ((dsp.echo_ring_buffer_addr + dsp.echo_pos) & 0xFFFF) as usize;
+    let (left_out, left_new_echo) = echo_process_inner(left, buffer_addr, dsp.echo_feedback_volume as i8, dsp.echo_vol_left as i8, &mut dsp.fir_left, ram);
+    let (right_out, right_new_echo) = echo_process_inner(right, buffer_addr + 2, dsp.echo_feedback_volume as i8, dsp.echo_vol_right as i8, &mut dsp.fir_right, ram);    
+
+    if dsp.echo_buffer_enable {
+        let left_lower  = left_new_echo as u8;
+        let left_upper  = (left_new_echo >> 8) as u8;
+        let right_lower = right_new_echo as u8;
+        let right_upper = (right_new_echo >> 8) as u8;
+
+        [left_lower, left_upper, right_lower, right_upper].iter().zip(0..).for_each (|(&sample, idx)| {
+            ram.ram[buffer_addr + idx] = sample;
+        });
+    }
+
+    if dsp.echo_pos == 0 {
+        dsp.echo_buf_length = (dsp.echo_buffer_size as u16 & 0x0F) * 0x800;
+    }
+    dsp.echo_pos += 4;
+    if dsp.echo_pos >= dsp.echo_buf_length {
+        dsp.echo_pos = 0;
+    }
+
+    (left_out as i16, right_out as i16)
+}
+
+fn echo_process_inner(echo_sample: i16, addr: usize, feedback_volume: i8, out_volume: i8, fir: &mut FIR, ram: &Ram) -> (i32, i16) {
+    let buf_echo = ((ram.ram[addr + 1] as u16) << 8) | (ram.ram[addr]) as u16;
+    let fir_out = fir.next(buf_echo as i16);
+    
+    let out_echo = ((fir_out as i32) * (out_volume as i32)) >> 7;
+    let new_echo = (echo_sample as i32) + (((fir_out as i32) * (feedback_volume as i32)) >> 7);
+    let new_echo = 
+        if new_echo > 0x7FFF { 0x7FFF }
+        else if new_echo < -0x8000 { -0x8000 }
+        else { new_echo };
+
+    let new_echo = (new_echo as u16) & 0xFFFE;
+
+    (out_echo, new_echo as i16)
 }
 
 fn u8_to_vec(v: u8) -> Vec<bool> {
