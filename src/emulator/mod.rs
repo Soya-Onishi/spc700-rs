@@ -4,4 +4,3 @@ pub mod timer;
 
 pub mod instruction;
 mod register;
-mod execution;

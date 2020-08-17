@@ -4,7 +4,6 @@ mod envelope;
 use std::u8;
 use std::i16;
 use std::u16;
-use std::u32;
 
 use envelope::*;
 use crate::emulator::ram::Ram;
@@ -62,8 +61,7 @@ pub struct DSPBlock {
     start_addr: u16,
     loop_addr: u16,
     src_addr: u16,
-    brr_info: BRRInfo,
-    brr_nibbles: Vec<u8>,
+    brr_info: BRRInfo,    
     envelope: Envelope,    
 
     pitch_counter: u16,    
@@ -548,8 +546,7 @@ impl DSPBlock {
             start_addr: 0,
             loop_addr: 0,
             src_addr: 0,
-            brr_info: BRRInfo::empty(),
-            brr_nibbles: vec![0; 8],
+            brr_info: BRRInfo::empty(),            
             envelope: Envelope::empty(),
 
             pitch_counter: 0,            

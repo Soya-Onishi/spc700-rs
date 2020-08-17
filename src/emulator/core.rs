@@ -1,7 +1,6 @@
 extern crate spc;
 
 use super::ram::*;
-use super::instruction::Instruction;
 use super::register::*;
 use crate::dsp::DSP;
 use crate::emulator::timer::Timer;
@@ -28,14 +27,11 @@ impl Spc700 {
 
         let divider0 = spc.ram[0x00FA];
         let divider1 = spc.ram[0x00FB];
-        let divider2 = spc.ram[0x00FC];
-        let timer_out0 = spc.ram[0x00FD];
-        let timer_out1 = spc.ram[0x00FE];
-        let timer_out2 = spc.ram[0x00FF];
+        let divider2 = spc.ram[0x00FC];        
 
         let mut timer: Vec<Timer> = [8000, 8000, 64000].iter()
-            .zip([(divider0, timer_out0), (divider1, timer_out1), (divider2, timer_out2)].iter())
-            .map(|(&hz, &(divider, out))| Timer::new_with_init(hz, divider, 0))
+            .zip([divider0, divider1, divider2].iter())
+            .map(|(&hz, &divider)| Timer::new_with_init(hz, divider, 0))
             .collect();
 
         let control = spc.ram[0x00F1]; 
@@ -87,24 +83,12 @@ impl Spc700 {
     fn clock(&mut self) -> () {
         if self.is_stopped {
             self.cycles(2);
+            self.dsp.flush(&mut self.ram);
             return;
         }
 
-        static mut ALL_CYCLE: u64 = 0;
-        let before_cycle = self.cycle_counter;
-
         let pc = self.reg.inc_pc(1);
-        let opcode = self.read_ram(pc);
-        let mut inst = Instruction::decode(opcode);
-
-        unsafe {
-            
-                // println!("[{:#08x}] opcode: {:#04x}, pc: {:#06x}, a: {:#04x}, x: {:#04x}, y: {:#04x}, sp: {:#04x}, psw: {:#010b}", ALL_CYCLE, opcode, pc, self.reg.a, self.reg.x, self.reg.y, self.reg.sp, self.reg.psw.get());            
-                let timer = &self.timer[0];
-                // println!("enable: {}, cycle: {:#06x}, out: {:#03x}, divided: {:#06x}, divider: {:#04x}", timer.enable, timer.cycle_counter, timer.out, timer.divided, timer.divider);
-            
-        }
-        
+        let opcode = self.read_ram(pc);                
         let (upper, lower) = (opcode >> 4, opcode & 0xF);
         let op_select = |upper: u8| {
             match upper {
