@@ -1470,12 +1470,7 @@ impl Spc700 {
 
     fn read_ram(&mut self, addr: u16) -> u8 {
         self.cycles(1);
-        let data = self.ram.read(addr, &mut self.dsp, &mut self.timer);
-
-        
-        // println!("[ read ram] addr: {:#06x}, data: {:#04x}", addr, data);        
-        
-        data        
+        self.ram.read(addr, &mut self.dsp, &mut self.timer)
     }    
 
     fn write_to_page(&mut self, addr: u8, data: u8) -> () {
@@ -1491,32 +1486,13 @@ impl Spc700 {
     pub fn write_ram(&mut self, addr: u16, data: u8) -> () {
         self.cycles(1);
         self.ram.write(addr, data, &mut self.dsp, &mut self.timer);
-        
-        // println!("[write ram] addr: {:#06x}, data: {:#04x}", addr, data);        
-        
-        if addr == 0x2140 {
-            // println!("write data: {:#04x}", data);
-        }
     }
 
-    pub fn cycles(&mut self, cycle_count: u16) -> () {
-        // static mut IS_ALREADY_OVER1: bool = false;
-        // static mut IS_ALREADY_OVER2: bool = false;
-
+    pub fn cycles(&mut self, cycle_count: u16) -> () {        
         self.dsp.cycles(cycle_count);
         self.timer.iter_mut().for_each(|timer| timer.cycles(cycle_count));
         self.cycle_counter += cycle_count as u64;
         self.total_cycles += cycle_count as u64;
-
-        /* unsafe {
-            if !IS_ALREADY_OVER1 && self.total_cycles >= 28_672_000 {
-                eprintln!("start record");
-                IS_ALREADY_OVER1 = true;
-            } else if !IS_ALREADY_OVER2 && self.total_cycles >= 36_864_000 {
-                eprintln!("end record");
-                IS_ALREADY_OVER2 = true
-            }
-        } */
     }
 }
 
