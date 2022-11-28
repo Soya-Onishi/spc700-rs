@@ -14,7 +14,7 @@ impl Timer {
     let max_cycle = match hz {
       8000  => 256,
       64000 => 32,
-      _ => panic!(format!("{} is invalid, require 8000 or 64000", hz)),
+      _ => panic!("{} is invalid, require 8000 or 64000", hz),
     };
 
     Timer {

@@ -2,10 +2,11 @@
 name = "spc700-rs"
 version = "0.1.0"
 authors = ["soya <ohnishi.soya@arc.cs.okayama-u.ac.jp>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 
 spc = "0.1.1"
 cpal = "0.12.1"
 hound = "3.4.0"
+clap = "4.0" 

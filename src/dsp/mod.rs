@@ -401,7 +401,7 @@ impl DSP {
             (  0x7, 0xD) => self.echo_buffer_size,
             (upper, 0xE) => self.unused_e[upper],
             (upper, 0xF) => self.fir_left.filter[upper] as u8,         
-            _ => panic!(format!("{:#06x} is not unexpected address", addr)),
+            _ => panic!("{:#06x} is not unexpected address", addr),
         }                
     }
 
@@ -504,7 +504,7 @@ impl DSP {
                 self.fir_left.filter[upper] = (data as i8) as i16;
                 self.fir_right.filter[upper] = (data as i8) as i16; 
             }
-            _ => panic!(format!("{:#06x} is not expected address", addr)),
+            _ => panic!("{:#06x} is not expected address", addr),
         }
     }
 

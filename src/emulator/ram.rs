@@ -133,7 +133,7 @@ impl Ram {
             0x00FD => timer[0].read_out(),
             0x00FE => timer[1].read_out(),
             0x00FF => timer[2].read_out(),
-            _ => panic!(format!("{:#06x} should not be io address", addr)),
+            _ => panic!("{:#06x} should not be io address", addr),
         }
     }
 
@@ -160,7 +160,7 @@ impl Ram {
             0x00FB => timer[1].write_divider(data), // timer 1 divider settings
             0x00FC => timer[2].write_divider(data), // timer 2 divider settings
             0x00FD..=0x00FF => (), // writing to TxOUT is not available (T0OUT, T1OUT, T2OUT is read only).
-            _ => panic!(format!("{:#06x} should not be io address", addr)),
+            _ => panic!("{:#06x} should not be io address", addr),
         };
 
         // data is also written to ram
