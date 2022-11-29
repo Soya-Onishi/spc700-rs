@@ -20,30 +20,18 @@ impl Amplifier {
       buffer_size: cpal::BufferSize::Default,
       sample_rate: cpal::SampleRate(32000),
     };
-    let (tx, rx) = mpsc::sync_channel::<(i16, i16)>(BUFFER_SIZE);
-    
+ 
     let stream = match format {
       cpal::SampleFormat::F32 => {
-        build_stream::<f32>(&device, &config, rx)
+        build_stream::<f32>(&device, &config, core)
       }
       cpal::SampleFormat::I16 => {
-        build_stream::<i16>(&device, &config, rx)
+        build_stream::<i16>(&device, &config, core)
       }
       cpal::SampleFormat::U16 => {
-        build_stream::<u16>(&device, &config, rx)
+        build_stream::<u16>(&device, &config, core)
       }
     };
-
-    // thread for creating samples
-    let mut core = core;
-    {
-      thread::spawn(move || {
-        loop {
-          let output = core.next_sample();
-          tx.send(output).unwrap();
-        }
-      });
-    }
 
     stream.play().unwrap();
 
@@ -63,20 +51,27 @@ fn build_config() -> (cpal::Device, cpal::SupportedStreamConfig) {
   (device, config)
 }
 
-fn build_stream<T: cpal::Sample>(
+fn build_stream<T: cpal::Sample + std::marker::Send + 'static>(
   device: &cpal::Device,
   config: &cpal::StreamConfig,
-  rx: mpsc::Receiver<(i16, i16)>,
+  mut core: Spc700
 ) -> cpal::Stream {  
   let channels = config.channels as usize;
-  let error_callback = |err| eprintln!("an error occurred on stream: {}", err);  
 
+  let (tx, rx) = mpsc::sync_channel(BUFFER_SIZE);
+
+  thread::spawn(move || {
+    loop {
+      let (left, right) = core.next_sample();
+      let output = ((left as i32 + right as i32) / 2) as i16;
+      tx.send(T::from(&output)).unwrap();
+    } 
+  });
+
+  let error_callback = |err| eprintln!("an error occurred on stream: {}", err);  
   let data_callback = move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
     for (dsts, output) in data.chunks_mut(channels).zip(rx.iter()) {
-      let (left, right) = output;
-      let sample = ((left as i32 + right as i32) / 2) as i16;
-      let sample = cpal::Sample::from(&sample);
-      dsts.fill(sample);
+      dsts.fill(output);
     }
   };
 
