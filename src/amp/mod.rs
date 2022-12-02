@@ -7,6 +7,7 @@ use std::f32;
 use std::sync::mpsc;
 use std::thread;
 
+const SAMPLE_RATE: u32 = 32000;
 const INPUT_SAMPLING_RATE: usize = 32000;
 const BUFFER_SIZE: usize = INPUT_SAMPLING_RATE * 8;
 
@@ -14,12 +15,10 @@ pub struct Amplifier;
 impl Amplifier {
   pub fn play(core: Spc700) -> ! {
     let (device, config) = build_config();
+    let configs = device.supported_output_configs().unwrap().find(|config| config.max_sample_rate < ))
     let format = config.sample_format();
-    let config = cpal::StreamConfig {
-      channels: config.channels(),
-      buffer_size: cpal::BufferSize::Default,
-      sample_rate: cpal::SampleRate(32000),
-    };
+    let mut config = cpal::StreamConfig::from(config);
+    config.sample_rate = cpal::SampleRate(32000);
  
     let stream = match format {
       cpal::SampleFormat::F32 => {
@@ -70,8 +69,8 @@ fn build_stream<T: cpal::Sample + std::marker::Send + 'static>(
 
   let error_callback = |err| eprintln!("an error occurred on stream: {}", err);  
   let data_callback = move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-    for (dsts, output) in data.chunks_mut(channels).zip(rx.iter()) {
-      dsts.fill(output);
+    for dsts in data.chunks_mut(channels) {
+      dsts.fill(rx.recv().unwrap());
     }
   };
 
