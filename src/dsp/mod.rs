@@ -760,10 +760,9 @@ fn generate_additional_pitch(reg: &DSPRegister, before_out: Option<i16>) -> u16 
 
 fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], sample_idx: i8) -> i16 {    
     let idx = |i: i8| -> usize {        
-        let idx = (sample_idx + i + (SAMPLE_BUFFER_SIZE as i8)) % (SAMPLE_BUFFER_SIZE as i8);
-
+        let idx = (sample_idx + i).rem_euclid(SAMPLE_BUFFER_SIZE as i8);
         idx as usize
-    };
+    };  
 
     let factor0 = (gaussian_table::GAUSSIAN_TABLE[0x0FF - base_idx] as i32 * buffer[idx(-3)] as i32) >> 10;
     let factor1 = (gaussian_table::GAUSSIAN_TABLE[0x1FF - base_idx] as i32 * buffer[idx(-2)] as i32) >> 10;
@@ -774,12 +773,8 @@ fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], s
     let out = out + factor1;
     let out = out + factor2;    
     let out = out + factor3;    
-    let out = 
-        if out > 0x7FFF { 0x7FFF }
-        else if out < -0x8000 { -0x8000 }
-        else { out };
-    
-    
+    let out = out.min(0x7FFF).max(-0x8000);
+     
     (out as i16) & !1
     // out as i16
     // buffer[idx(0)]
@@ -790,37 +785,32 @@ fn combine_all_sample(blocks: &Vec<DSPBlock>, dsp: &DSP) -> (i16, i16) {
     let f = |samples: Vec<i16>, master_vol: i8| -> i16 {
         let acc: i32 = samples.iter().fold(0, |acc, &sample| {
             let sum = acc + (sample as i32);
-
-            if sum > 0x7FFF { 0x7FFF }
-            else if sum < -0x8000 { -0x8000 }
-            else { sum }
+            sum.min(0x7FFF).max(-0x8000)
         });
 
         let out = (acc * (master_vol as i32)) >> 7;
-        let out = 
-            if out > 0x7FFF       { 0x7FFF }
-            else if out < -0x8000 { -0x8000 }
-            else                  { out };
+        let out = out.min(0x7FFF).max(-0x8000); 
 
-        if dsp.is_mute { 0 } else { out as i16 }
+        out as i16
     };
 
-    let lefts: Vec<i16> = blocks.iter().map(|blk| blk.sample_left).collect();
-    let rights: Vec<i16> = blocks.iter().map(|blk| blk.sample_right).collect();
-    let left = f(lefts, dsp.master_vol_left as i8);
-    let right = f(rights, dsp.master_vol_right as i8);
+    if dsp.is_mute {
+        (0, 0)
+    } else {
+        let lefts: Vec<i16> = blocks.iter().map(|blk| blk.sample_left).collect();
+        let rights: Vec<i16> = blocks.iter().map(|blk| blk.sample_right).collect();
+        let left = f(lefts, dsp.master_vol_left as i8);
+        let right = f(rights, dsp.master_vol_right as i8);
 
-    (left, right)
+        (left, right)
+    } 
 }
 
 fn combine_echo(blocks: &Vec<DSPBlock>) -> (i16, i16) {
     let f = |samples: Vec<i16>| -> i32 {
         samples.iter().fold(0, |acc, &sample| {
             let sum = acc + (sample as i32);
-
-            if sum > 0x7FFF       { 0x7FFF }
-            else if sum < -0x8000 { -0x8000 }
-            else                  { sum }
+            sum.min(0x7FFF).max(-0x8000)
         })
     };
 
