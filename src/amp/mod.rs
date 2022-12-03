@@ -15,11 +15,21 @@ pub struct Amplifier;
 impl Amplifier {
   pub fn play(core: Spc700) -> ! {
     let (device, config) = build_config();
-    let configs = device.supported_output_configs().unwrap().find(|config| config.max_sample_rate < ))
+
+    // 32000Hzの再生に対応しているconfigを探す。
+    // 32000HzはSPC700が再生時に使用するサンプリングレート
+    let config = device.supported_output_configs()
+      .unwrap()
+      .find(|config| {
+        let cpal::SampleRate(max) = config.max_sample_rate();
+        let cpal::SampleRate(min) = config.min_sample_rate();
+        min <= SAMPLE_RATE && SAMPLE_RATE <= max
+      })
+      .expect("there are no current device configs to play on 32000Hz.")
+      .with_sample_rate(cpal::SampleRate(SAMPLE_RATE));
+
     let format = config.sample_format();
-    let mut config = cpal::StreamConfig::from(config);
-    config.sample_rate = cpal::SampleRate(32000);
- 
+    let config = config.config();
     let stream = match format {
       cpal::SampleFormat::F32 => {
         build_stream::<f32>(&device, &config, core)
