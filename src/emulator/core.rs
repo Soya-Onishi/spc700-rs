@@ -19,6 +19,329 @@ pub struct Spc700 {
     is_stopped: bool
 }
 
+const DECODE_TABLE: [fn(&mut Spc700, u8) -> (); 256] = [
+    // upper opcode: 0x0
+    // lower opcode: 0x0
+    Spc700::nop,
+    Spc700::tcall,
+    Spc700::set1,
+    Spc700::branch_by_mem_bit,
+    Spc700::alu_dp,
+    Spc700::alu_addr,
+    Spc700::alu_indirect_x,
+    Spc700::alu_x_ind_ind,
+    // upper opcode: 0x0
+    // lower opcode: 0x8
+    Spc700::alu_imm,
+    Spc700::alu_dp_dp,
+    Spc700::or1,
+    Spc700::shift_dp,
+    Spc700::shift_addr,
+    Spc700::push,
+    Spc700::tset1,
+    Spc700::brk,
+    // upper opcode: 0x1
+    // lower opcode: 0x0
+    Spc700::branch_by_psw,
+    Spc700::tcall,
+    Spc700::clr1,
+    Spc700::branch_by_mem_bit,
+    Spc700::alu_x_idx_indirect,
+    Spc700::alu_x_idx_addr,
+    Spc700::alu_y_idx_addr,
+    Spc700::alu_y_ind_ind,
+    // upper opcode: 0x1
+    // lower opcode: 0x8
+    Spc700::alu_dp_imm,
+    Spc700::alu_x_y,
+    Spc700::inc_dec_word,
+    Spc700::shift_x_idx_indirect,
+    Spc700::shift_acc,
+    Spc700::inc_dec_reg,
+    Spc700::alu_addr,
+    Spc700::jmp_abs_x,
+    // upper opcode: 0x2
+    // lower opcode: 0x0
+    Spc700::clrp,
+    Spc700::tcall,
+    Spc700::set1,
+    Spc700::branch_by_mem_bit,
+    Spc700::alu_dp,
+    Spc700::alu_addr,
+    Spc700::alu_indirect_x,
+    Spc700::alu_x_ind_ind,
+    // upper opcode: 0x2
+    // lower opcode: 0x8
+    Spc700::alu_imm,
+    Spc700::alu_dp_dp,
+    Spc700::or1,
+    Spc700::shift_dp,
+    Spc700::shift_addr,
+    Spc700::push,
+    Spc700::cbne,
+    Spc700::bra,
+    // upper opcode: 0x3
+    // lower opcode: 0x0
+    Spc700::branch_by_psw,
+    Spc700::tcall,
+    Spc700::clr1,
+    Spc700::branch_by_mem_bit,
+    Spc700::alu_x_idx_indirect,
+    Spc700::alu_x_idx_addr,
+    Spc700::alu_y_idx_addr,
+    Spc700::alu_y_ind_ind,
+    // upper opcode: 0x3
+    // lower opcode: 0x8
+    Spc700::alu_dp_imm,
+    Spc700::alu_x_y,
+    Spc700::inc_dec_word,
+    Spc700::shift_x_idx_indirect,
+    Spc700::shift_acc,
+    Spc700::inc_dec_reg,
+    Spc700::alu_dp,
+    Spc700::call,
+    // upper opcode: 0x4
+    // lower opcode: 0x0,
+    Spc700::setp,
+    Spc700::tcall,
+    Spc700::set1,
+    Spc700::branch_by_mem_bit,
+    Spc700::alu_dp,
+    Spc700::alu_addr,
+    Spc700::alu_indirect_x,
+    Spc700::alu_x_ind_ind,
+    // upper opcode: 0x4
+    // lower opcode: 0x8
+    Spc700::alu_imm,
+    Spc700::alu_dp_dp,
+    Spc700::and1,
+    Spc700::shift_dp,
+    Spc700::shift_addr,
+    Spc700::push,
+    Spc700::tclr1,
+    Spc700::pcall,
+    // upper opcode: 0x5
+    // lower opcode: 0x0
+    Spc700::branch_by_psw,
+    Spc700::tcall,
+    Spc700::clr1,
+    Spc700::branch_by_mem_bit,
+    Spc700::alu_x_idx_indirect,
+    Spc700::alu_x_idx_addr,
+    Spc700::alu_y_idx_addr,
+    Spc700::alu_y_ind_ind,
+    // upper opcode: 0x5
+    // lower opcode: 0x8
+    Spc700::alu_dp_imm,
+    Spc700::alu_x_y,
+    Spc700::cmpw,
+    Spc700::shift_x_idx_indirect,
+    Spc700::shift_acc,
+    Spc700::mov_reg_reg,
+    Spc700::alu_addr,
+    Spc700::jmp_abs,
+    // upper opcode: 0x6
+    // lower opcode: 0x0
+    Spc700::clrc,
+    Spc700::tcall,
+    Spc700::set1,
+    Spc700::branch_by_mem_bit,
+    Spc700::alu_dp,
+    Spc700::alu_addr,
+    Spc700::alu_indirect_x,
+    Spc700::alu_x_ind_ind,
+    // upper opcode: 0x6
+    // lower opcode: 0x8
+    Spc700::alu_imm,
+    Spc700::alu_dp_dp,
+    Spc700::and1,
+    Spc700::shift_dp,
+    Spc700::shift_addr,
+    Spc700::push,
+    Spc700::dbnz_data,
+    Spc700::ret,
+    // upper opcode: 0x7
+    // lower opcode: 0x0
+    Spc700::branch_by_psw,
+    Spc700::tcall,
+    Spc700::clr1,
+    Spc700::branch_by_mem_bit,
+    Spc700::alu_x_idx_indirect,
+    Spc700::alu_x_idx_addr,
+    Spc700::alu_y_idx_addr,
+    Spc700::alu_y_ind_ind,
+    // upper opcode: 0x7
+    // lower opcode: 0x8 
+    Spc700::alu_dp_imm,
+    Spc700::alu_x_y,
+    Spc700::addw,
+    Spc700::shift_x_idx_indirect,
+    Spc700::shift_acc,
+    Spc700::mov_reg_reg,
+    Spc700::alu_dp,
+    Spc700::ret1,
+    // upper opcode: 0x8
+    // lower opcode: 0x0
+    Spc700::setc,
+    Spc700::tcall,
+    Spc700::set1,
+    Spc700::branch_by_mem_bit,
+    Spc700::alu_dp,
+    Spc700::alu_addr,
+    Spc700::alu_indirect_x,
+    Spc700::alu_x_ind_ind,
+    // upper opcode: 0x8
+    // lower opcode: 0x8
+    Spc700::alu_imm,
+    Spc700::alu_dp_dp,
+    Spc700::eor1,
+    Spc700::inc_dec_dp,
+    Spc700::inc_dec_addr,
+    Spc700::mov_reg_imm,
+    Spc700::pop,
+    Spc700::mov_store_dp_imm,
+    // upper opcode: 0x9
+    // lower opcode: 0x0
+    Spc700::branch_by_psw,
+    Spc700::tcall,
+    Spc700::clr1,
+    Spc700::branch_by_mem_bit,
+    Spc700::alu_x_idx_indirect,
+    Spc700::alu_x_idx_addr,
+    Spc700::alu_y_idx_addr,
+    Spc700::alu_y_ind_ind,
+    // upper opcode: 0x9
+    // lower opcode: 0x8
+    Spc700::alu_dp_imm,
+    Spc700::alu_x_y,
+    Spc700::subw,
+    Spc700::inc_dec_x_idx_indirect,
+    Spc700::inc_dec_reg,
+    Spc700::mov_reg_reg,
+    Spc700::div,
+    Spc700::xcn,
+    // upper opcode: 0xA
+    // lower opcode: 0x0
+    Spc700::ei,
+    Spc700::tcall,
+    Spc700::set1,
+    Spc700::branch_by_mem_bit,
+    Spc700::alu_dp,
+    Spc700::alu_addr,
+    Spc700::alu_indirect_x,
+    Spc700::alu_x_ind_ind,
+    // upper opcode: 0xA
+    // lower opcode: 0x8
+    Spc700::alu_imm,
+    Spc700::alu_dp_dp,
+    Spc700::mov1_to_psw,
+    Spc700::inc_dec_dp,
+    Spc700::inc_dec_addr,
+    Spc700::alu_imm,
+    Spc700::pop,
+    Spc700::mov_store_x_indirect_inc,
+    // upper opcode: 0xB
+    // lower opcode: 0x0
+    Spc700::branch_by_psw,
+    Spc700::tcall,
+    Spc700::clr1,
+    Spc700::branch_by_mem_bit,
+    Spc700::alu_x_idx_indirect,
+    Spc700::alu_x_idx_addr,
+    Spc700::alu_y_idx_addr,
+    Spc700::alu_y_ind_ind,
+    // upper opcode: 0xB
+    // lower opcode: 0x8
+    Spc700::alu_dp_imm,
+    Spc700::alu_x_y,
+    Spc700::mov_load_word,
+    Spc700::inc_dec_x_idx_indirect,
+    Spc700::inc_dec_reg,
+    Spc700::mov_reg_reg,
+    Spc700::das,
+    Spc700::mov_load_x_indirect_inc,
+    // upper opcode: 0xC
+    // lower opcode: 0x0
+    Spc700::di,
+    Spc700::tcall,
+    Spc700::set1,
+    Spc700::branch_by_mem_bit,
+    Spc700::mov_store_dp_reg,
+    Spc700::mov_store_addr,
+    Spc700::mov_store_x_indirect,
+    Spc700::mov_store_x_ind_ind,
+    // upper opcode: 0xC
+    // lower opcode: 0x8
+    Spc700::alu_imm,
+    Spc700::mov_store_addr,
+    Spc700::mov1_to_mem,
+    Spc700::mov_store_dp_reg,
+    Spc700::mov_store_addr,
+    Spc700::mov_reg_imm,
+    Spc700::pop,
+    Spc700::mul,
+    // upper opcode: 0xD
+    // lower opcode: 0x0
+    Spc700::branch_by_psw,
+    Spc700::tcall,
+    Spc700::clr1,
+    Spc700::branch_by_mem_bit,
+    Spc700::mov_store_x_idx_indirect,
+    Spc700::mov_store_x_idx_addr,
+    Spc700::mov_store_y_idx_addr,
+    Spc700::mov_store_y_ind_ind,
+    // upper opcode: 0xD
+    // lower opcode: 0x8
+    Spc700::mov_store_dp_reg,
+    Spc700::mov_store_y_idx_indirect,
+    Spc700::mov_store_word,
+    Spc700::mov_store_x_idx_indirect,
+    Spc700::inc_dec_reg,
+    Spc700::mov_reg_reg,
+    Spc700::cbne,
+    Spc700::daa,
+    // upper opcode: 0xE
+    // lower opcode: 0x0
+    Spc700::clrv,
+    Spc700::tcall,
+    Spc700::set1,
+    Spc700::branch_by_mem_bit,
+    Spc700::mov_load_dp,
+    Spc700::mov_load_addr,
+    Spc700::mov_load_x_indirect,
+    Spc700::mov_load_x_ind_ind,
+    // upper opcode: 0xE
+    // lower opcode: 0x8
+    Spc700::mov_reg_imm,
+    Spc700::mov_load_addr,
+    Spc700::not1,
+    Spc700::mov_load_dp,
+    Spc700::mov_load_addr,
+    Spc700::notc,
+    Spc700::pop,
+    Spc700::sleep_or_stop,
+    // upper opcode: 0xF
+    // lower opcode: 0x0
+    Spc700::branch_by_psw,
+    Spc700::tcall,
+    Spc700::clr1,
+    Spc700::branch_by_mem_bit,
+    Spc700::mov_load_x_idx_indirect,
+    Spc700::mov_load_x_idx_addr,
+    Spc700::mov_load_y_idx_addr,
+    Spc700::mov_load_y_ind_ind,
+    // upper opcode: 0xF
+    // lower opcode: 0x8
+    Spc700::mov_load_dp,
+    Spc700::mov_load_y_idx_indirect,
+    Spc700::mov_store_dp_dp,
+    Spc700::mov_load_x_idx_indirect,
+    Spc700::inc_dec_reg,
+    Spc700::mov_reg_reg,
+    Spc700::dbnz_y,
+    Spc700::sleep_or_stop,
+];
+
 impl Spc700 {
     pub fn new_with_init<P: AsRef<Path>>(path: P) -> Result<Spc700> {
         let spc = Spc::load(path)?;
@@ -79,7 +402,7 @@ impl Spc700 {
 
         (self.dsp.sample_left_out(), self.dsp.sample_right_out())
     }
-
+    
     fn clock(&mut self) -> () {
         if self.is_stopped {
             self.cycles(2);
@@ -89,224 +412,22 @@ impl Spc700 {
 
         let pc = self.reg.inc_pc(1);
         let opcode = self.read_ram(pc);                
-        let (upper, lower) = (opcode >> 4, opcode & 0xF);
-        let op_select = |upper: u8| {
-            match upper {
-                0x0 | 0x1 => or,
-                0x2 | 0x3 => and,
-                0x4 | 0x5 => eor,
-                0x6 | 0x7 => cmp,
-                0x8 | 0x9 => adc,
-                0xA | 0xB => sbc,
-                _ => panic!("upper must be between 0x0 to 0xB. actual {:#04x}", upper),
-            }
-        };
-        let shift_select = |upper: u8| {
-            match upper {
-                0x0 | 0x1 => asl,
-                0x2 | 0x3 => rol,
-                0x4 | 0x5 => lsr,
-                0x6 | 0x7 => ror,
-                _ => panic!("upper expects to be between 0 to 7. actual: {:#04x}", upper),
-            }
-        };
-        
-        let is_cmp = |upper: u8| { upper == 0x6 || upper == 0x7 };
-
-        match (upper, lower) {            
-            (  0x0, 0x0) => self.nop(),
-            (upper, 0x0) if upper % 2 == 1 => self.branch_by_psw(opcode),
-            (  0x2, 0x0) => self.clrp(),
-            (  0x4, 0x0) => self.setp(),
-            (  0x6, 0x0) => self.clrc(),
-            (  0x8, 0x0) => self.setc(),
-            (  0xA, 0x0) => self.ei(),
-            (  0xC, 0x0) => self.di(),
-            (  0xE, 0x0) => self.clrv(),
-            (    _, 0x1) => self.tcall(opcode),
-            (upper, 0x2) if upper % 2 == 0 => self.set1(opcode),
-            (    _, 0x2) => self.clr1(opcode),
-            (    _, 0x3) => self.branch_by_mem_bit(opcode),            
-            (upper, 0x4) if upper <= 0xB && upper % 2 == 0 => {
-                let op = op_select(upper);
-                self.alu_dp(0, op);
-            },
-            (upper, 0x4) if upper <= 0xB => {
-                let op = op_select(upper);
-                self.alu_x_idx_indirect(op);
-            },
-            (  0xC, 0x4) => self.mov_store_dp_reg(0),
-            (  0xD, 0x4) => self.mov_store_x_idx_indirect(0),
-            (  0xE, 0x4) => self.mov_load_dp(0),
-            (  0xF, 0x4) => self.mov_load_x_idx_indirect(0),
-            (upper, 0x5) if upper <= 0xB && upper % 2 == 0 => {
-                let op = op_select(upper);
-                self.alu_addr(0, op);
-            },
-            (upper, 0x5) if upper <= 0xB => {
-                let op = op_select(upper);
-                self.alu_x_idx_addr(op);
-            },
-            (  0xC, 0x5) => self.mov_store_addr(0),
-            (  0xD, 0x5) => self.mov_store_x_idx_addr(),
-            (  0xE, 0x5) => self.mov_load_addr(0),
-            (  0xF, 0x5) => self.mov_load_x_idx_addr(),
-            (upper, 0x6) if upper <= 0xB && upper % 2 == 0 => {
-                let op = op_select(upper);
-                self.alu_indirect_x(op);
-            },
-            (upper, 0x6) if upper <= 0xB => {
-                let op = op_select(upper);
-                self.alu_y_idx_addr(op);
-            },
-            (  0xC, 0x6) => self.mov_store_x_indirect(),
-            (  0xD, 0x6) => self.mov_store_y_idx_addr(),
-            (  0xE, 0x6) => self.mov_load_x_indirect(),
-            (  0xF, 0x6) => self.mov_load_y_idx_addr(),
-            (upper, 0x7) if upper <= 0xB && upper % 2 == 0 => {
-                let op = op_select(upper);
-                self.alu_x_ind_ind(op);
-            },
-            (upper, 0x7) if upper <= 0xB => {
-                let op = op_select(upper);
-                self.alu_y_ind_ind(op);
-            },
-            (  0xC, 0x7) => self.mov_store_x_ind_ind(),
-            (  0xD, 0x7) => self.mov_store_y_ind_ind(),
-            (  0xE, 0x7) => self.mov_load_x_ind_ind(),
-            (  0xF, 0x7) => self.mov_load_y_ind_ind(),
-            (upper, 0x8) if upper <= 0xB && upper % 2 == 0 => {
-                let op = op_select(upper);
-                self.alu_imm(0, op);
-            },
-            (upper, 0x8) if upper <= 0xB => {
-                let op = op_select(upper);
-                self.alu_dp_imm(is_cmp(upper), op);
-            },
-            (  0xC, 0x8) => self.alu_imm(1, cmp),
-            (  0xD, 0x8) => self.mov_store_dp_reg(1),
-            (  0xE, 0x8) => self.mov_reg_imm(0),
-            (  0xF, 0x8) => self.mov_load_dp(1),
-            (upper, 0x9) if upper <= 0xB && upper % 2 == 0 => {
-                let op = op_select(upper);
-                self.alu_dp_dp(is_cmp(upper), op);
-            },
-            (upper, 0x9) if upper <= 0xB => {
-                let op = op_select(upper);
-                self.alu_x_y(is_cmp(upper), op);
-            },
-            (  0xC, 0x9) => self.mov_store_addr(1),
-            (  0xD, 0x9) => self.mov_store_y_idx_indirect(),
-            (  0xE, 0x9) => self.mov_load_addr(1),
-            (  0xF, 0x9) => self.mov_load_y_idx_indirect(),
-            (upper, 0xA) if upper % 2 == 0 => {
-                match upper / 2 {
-                    0 | 1 => self.or1(opcode),
-                    2 | 3 => self.and1(opcode),
-                    4     => self.eor1(),
-                    5     => self.mov1_to_psw(),
-                    6     => self.mov1_to_mem(),
-                    7     => self.not1(),
-                    other => panic!("upper / 2 must be between 0 to 7, actual {:#04x}", other),
-                };
-            }
-            (  0x1, 0xA) => self.inc_dec_word(!0),
-            (  0x3, 0xA) => self.inc_dec_word( 1),
-            (  0x5, 0xA) => self.cmpw(),
-            (  0x7, 0xA) => self.addw(),
-            (  0x9, 0xA) => self.subw(),
-            (  0xB, 0xA) => self.mov_load_word(),
-            (  0xD, 0xA) => self.mov_store_word(),
-            (  0xF, 0xA) => self.mov_store_dp_dp(),
-            (upper, 0xB) if upper <= 0x7 && upper % 2 == 0 => {
-                let op = shift_select(upper);
-                self.shift_dp(opcode, op);
-            },
-            (upper, 0xB) if upper <= 0x7 => {
-                let op = shift_select(upper);
-                self.shift_x_idx_indirect(opcode, op);
-            },
-            (  0x8, 0xB) => self.inc_dec_dp(opcode),
-            (  0x9, 0xB) => self.inc_dec_x_idx_indirect(opcode),
-            (  0xA, 0xB) => self.inc_dec_dp(opcode),
-            (  0xB, 0xB) => self.inc_dec_x_idx_indirect(opcode),
-            (  0xC, 0xB) => self.mov_store_dp_reg(2),
-            (  0xD, 0xB) => self.mov_store_x_idx_indirect(2),
-            (  0xE, 0xB) => self.mov_load_dp(2),
-            (  0xF, 0xB) => self.mov_load_x_idx_indirect(2),
-            (upper, 0xC) if upper <= 0x7 && upper % 2 == 0 => {
-                let op = shift_select(upper);
-                self.shift_addr(opcode, op);
-            },
-            (upper, 0xC) if upper <= 0x7 => {
-                let op = shift_select(upper);
-                self.shift_acc(opcode, op);
-            },
-            (  0x8, 0xC) => self.inc_dec_addr(opcode),
-            (  0x9, 0xC) => self.inc_dec_reg(opcode, 0),
-            (  0xA, 0xC) => self.inc_dec_addr(opcode),
-            (  0xB, 0xC) => self.inc_dec_reg(opcode, 0),
-            (  0xC, 0xC) => self.mov_store_addr(2),
-            (  0xD, 0xC) => self.inc_dec_reg(opcode, 2),
-            (  0xE, 0xC) => self.mov_load_addr(2),
-            (  0xF, 0xC) => self.inc_dec_reg(opcode, 2),
-            (  0x0, 0xD) => self.push(3),
-            (  0x1, 0xD) => self.inc_dec_reg(opcode, 1),
-            (  0x2, 0xD) => self.push(0),
-            (  0x3, 0xD) => self.inc_dec_reg(opcode, 1),
-            (  0x4, 0xD) => self.push(1),
-            (  0x5, 0xD) => self.mov_reg_reg(0, 1),
-            (  0x6, 0xD) => self.push(2),
-            (  0x7, 0xD) => self.mov_reg_reg(1, 0),
-            (  0x8, 0xD) => self.mov_reg_imm(2),
-            (  0x9, 0xD) => self.mov_reg_reg(3, 1),
-            (  0xA, 0xD) => self.alu_imm(2, cmp),
-            (  0xB, 0xD) => self.mov_reg_reg(1, 3),
-            (  0xC, 0xD) => self.mov_reg_imm(1),
-            (  0xD, 0xD) => self.mov_reg_reg(2, 0),
-            (  0xE, 0xD) => self.notc(),
-            (  0xF, 0xD) => self.mov_reg_reg(0, 2),
-            (  0x0, 0xE) => self.tset1(),
-            (  0x1, 0xE) => self.alu_addr(1, cmp),
-            (  0x2, 0xE) => self.cbne(opcode),
-            (  0x3, 0xE) => self.alu_dp(1, cmp),
-            (  0x4, 0xE) => self.tclr1(),
-            (  0x5, 0xE) => self.alu_addr(2, cmp),
-            (  0x6, 0xE) => self.dbnz_data(),
-            (  0x7, 0xE) => self.alu_dp(2, cmp),
-            (  0x8, 0xE) => self.pop(3),
-            (  0x9, 0xE) => self.div(),
-            (  0xA, 0xE) => self.pop(0),
-            (  0xB, 0xE) => self.das(),
-            (  0xC, 0xE) => self.pop(1),
-            (  0xD, 0xE) => self.cbne(opcode),
-            (  0xE, 0xE) => self.pop(2),
-            (  0xF, 0xE) => self.dbnz_y(),
-            (  0x0, 0xF) => self.brk(),
-            (  0x1, 0xF) => self.jmp_abs_x(),
-            (  0x2, 0xF) => self.bra(),
-            (  0x3, 0xF) => self.call(),
-            (  0x4, 0xF) => self.pcall(),
-            (  0x5, 0xF) => self.jmp_abs(),
-            (  0x6, 0xF) => self.ret(),
-            (  0x7, 0xF) => self.ret1(),
-            (  0x8, 0xF) => self.mov_store_dp_imm(),
-            (  0x9, 0xF) => self.xcn(),
-            (  0xA, 0xF) => self.mov_store_x_indirect_inc(),
-            (  0xB, 0xF) => self.mov_load_x_indirect_inc(),
-            (  0xC, 0xF) => self.mul(),
-            (  0xD, 0xF) => self.daa(),
-            (  0xE, 0xF) => self.sleep_or_stop(),
-            (  0xF, 0xF) => self.sleep_or_stop(),
-            (upper, lower) => panic!("invalid parsed opcode. upper: {:#04x}, lower: {:#04x}", upper, lower),
-        }
+        let instruction = DECODE_TABLE[opcode as usize];
+        instruction(self, opcode);
 
         self.dsp.flush(&mut self.ram);  // flush in force                                        
     }
 
-    fn mov_reg_imm(&mut self, to: u8) -> () {
+    fn mov_reg_imm(&mut self, opcode: u8) -> () {
+        let reg_type = match opcode {
+            0x8D => 2,
+            0xCD => 1, 
+            0xE8 => 0,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+
         let imm = self.read_from_pc();
-        match to {
+        match reg_type {
             0 => self.reg.a = imm,
             1 => self.reg.x = imm,
             2 => self.reg.y = imm,
@@ -316,9 +437,32 @@ impl Spc700 {
         self.set_mov_flag(imm);
     }
 
-    fn mov_reg_reg(&mut self, from: u8, to: u8) -> () {
+    fn mov_reg_reg(&mut self, opcode: u8) -> () {
         self.cycles(1);
+       
+        let upper = (opcode >> 4) & 0x0F;
+        let lower = opcode & 0x0F;
         
+        let from = match (upper, lower) {
+            (0x5, 0xD) => 0,
+            (0x7, 0xD) => 1,
+            (0x9, 0xD) => 3,
+            (0xB, 0xD) => 1, 
+            (0xD, 0xD) => 2,
+            (0xF, 0xD) => 0,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+
+        let to = match (upper, lower) {
+            (0x5, 0xD) => 1,
+            (0x7, 0xD) => 0,
+            (0x9, 0xD) => 1,
+            (0xB, 0xD) => 3,
+            (0xD, 0xD) => 0,
+            (0xF, 0xD) => 2,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+
         let data = match from {
             0 => self.reg.a,
             1 => self.reg.x,
@@ -338,11 +482,18 @@ impl Spc700 {
         self.set_mov_flag(data);
     }
 
-    fn mov_load_dp(&mut self, to: u8) -> () {
+    fn mov_load_dp(&mut self, opcode: u8) -> () {
+        let reg_type = match opcode {
+            0xE4 => 0,
+            0xEB => 2,
+            0xF8 => 1,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+
         let addr = self.read_from_pc();
         let data = self.read_from_page(addr);
 
-        match to {
+        match reg_type {
             0 => self.reg.a = data,
             1 => self.reg.x = data,
             2 => self.reg.y = data,
@@ -352,12 +503,18 @@ impl Spc700 {
         self.set_mov_flag(data);
     }
 
-    fn mov_load_x_idx_indirect(&mut self, to: u8) -> () {
+    fn mov_load_x_idx_indirect(&mut self, opcode: u8) -> () {
+        let reg_type = match opcode {
+            0xF4 => 0,
+            0xFB => 2,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+
         let addr = self.read_from_pc().wrapping_add(self.reg.x);
         let data = self.read_from_page(addr);
         self.cycles(1);
 
-        match to {
+        match reg_type {
             0 => self.reg.a = data,
             2 => self.reg.y = data,
             _ => panic!("register type must be between 0 to 2"),
@@ -366,7 +523,7 @@ impl Spc700 {
         self.set_mov_flag(data);
     }
 
-    fn mov_load_y_idx_indirect(&mut self) -> () {
+    fn mov_load_y_idx_indirect(&mut self, _opcode: u8) -> () {
         let addr = self.read_from_pc().wrapping_add(self.reg.y);
         let data = self.read_from_page(addr);
         self.cycles(1);
@@ -375,13 +532,20 @@ impl Spc700 {
         self.set_mov_flag(data);
     }
 
-    fn mov_load_addr(&mut self, to: u8) -> () {
+    fn mov_load_addr(&mut self, opcode: u8) -> () {
+        let reg_type = match opcode {
+            0xE5 => 0,
+            0xE9 => 1,
+            0xEC => 2,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;
         let data = self.read_ram(addr);
 
-        match to {
+        match reg_type {
             0 => self.reg.a = data,
             1 => self.reg.x = data,
             2 => self.reg.y = data,
@@ -391,7 +555,7 @@ impl Spc700 {
         self.set_mov_flag(data);
     }
 
-    fn mov_load_x_idx_addr(&mut self) -> () {
+    fn mov_load_x_idx_addr(&mut self, _opcode: u8) -> () {
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;    
@@ -404,7 +568,7 @@ impl Spc700 {
         self.set_mov_flag(data);
     }
 
-    fn mov_load_y_idx_addr(&mut self) -> () {
+    fn mov_load_y_idx_addr(&mut self, _opcode: u8) -> () {
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;    
@@ -417,7 +581,7 @@ impl Spc700 {
         self.set_mov_flag(data);
     }
 
-    fn mov_load_x_indirect(&mut self) -> () {
+    fn mov_load_x_indirect(&mut self, _opcode: u8) -> () {
         let data = self.read_from_page(self.reg.x);
         self.cycles(1);
 
@@ -425,7 +589,7 @@ impl Spc700 {
         self.set_mov_flag(data);
     }
 
-    fn mov_load_x_indirect_inc(&mut self) -> () {
+    fn mov_load_x_indirect_inc(&mut self, _opcode: u8) -> () {
         self.cycles(1);
         let data = self.read_from_page(self.reg.x);
         self.reg.x = self.reg.x.wrapping_add(1);
@@ -435,7 +599,7 @@ impl Spc700 {
         self.set_mov_flag(data);
     }
 
-    fn mov_load_y_ind_ind(&mut self) -> () {
+    fn mov_load_y_ind_ind(&mut self, _opcode: u8) -> () {
         let base_addr = self.read_from_pc();
         let lower = self.read_from_page(base_addr) as u16;
         let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;        
@@ -448,7 +612,7 @@ impl Spc700 {
         self.set_mov_flag(data);
     }
 
-    fn mov_load_x_ind_ind(&mut self) -> () {
+    fn mov_load_x_ind_ind(&mut self, _opcode: u8) -> () {
         let base_addr = self.read_from_pc().wrapping_add(self.reg.x);        
         self.cycles(1);
         let lower = self.read_from_page(base_addr) as u16;
@@ -460,7 +624,7 @@ impl Spc700 {
         self.set_mov_flag(data);
     }
 
-    fn mov_load_word(&mut self) -> () {
+    fn mov_load_word(&mut self, _opcode: u8) -> () {
         let addr = self.read_from_pc();
         let word_lower = self.read_from_page(addr) as u16;
         let word_upper = self.read_from_page(addr.wrapping_add(1)) as u16;
@@ -482,7 +646,7 @@ impl Spc700 {
         self.reg.psw.set_sign(is_negative);
     }
 
-    fn mov_store_dp_imm(&mut self) -> () {
+    fn mov_store_dp_imm(&mut self, _opcode: u8) -> () {
         let imm = self.read_from_pc();
         let addr = self.read_from_pc();
         let _ = self.read_from_page(addr);        
@@ -490,7 +654,7 @@ impl Spc700 {
         self.write_to_page(addr, imm);        
     }
 
-    fn mov_store_dp_dp(&mut self) -> () {
+    fn mov_store_dp_dp(&mut self, _opcode: u8) -> () {
         let bb = self.read_from_pc();
         let b = self.read_from_page(bb);
         let aa = self.read_from_pc();        
@@ -498,10 +662,17 @@ impl Spc700 {
         self.write_to_page(aa, b);
     }
 
-    fn mov_store_dp_reg(&mut self, reg: u8) -> () {
+    fn mov_store_dp_reg(&mut self, opcode: u8) -> () {
+        let reg_type = match opcode {
+            0xC4 => 0,
+            0xCB => 2,
+            0xD8 => 1,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+
         let addr = self.read_from_pc();
         let _ = self.read_from_page(addr);
-        let data = match reg {
+        let data = match reg_type {
             0 => self.reg.a,
             1 => self.reg.x,
             2 => self.reg.y,
@@ -511,11 +682,17 @@ impl Spc700 {
         self.write_to_page(addr, data);
     }
 
-    fn mov_store_x_idx_indirect(&mut self, reg: u8) -> () {
+    fn mov_store_x_idx_indirect(&mut self, opcode: u8) -> () {
+        let reg_type = match opcode {
+            0xD4 => 0,
+            0xDB => 2,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+
         let addr = self.read_from_pc().wrapping_add(self.reg.x);
         self.cycles(1);
         let _ = self.read_from_page(addr);
-        let data = match reg {
+        let data = match reg_type {
             0 => self.reg.a,
             2 => self.reg.y,    
             _ => panic!("register type must be 0 or 2"),
@@ -524,7 +701,7 @@ impl Spc700 {
         self.write_to_page(addr, data);
     }
 
-    fn mov_store_y_idx_indirect(&mut self) -> () {
+    fn mov_store_y_idx_indirect(&mut self, _opcode: u8) -> () {
         let addr = self.read_from_pc().wrapping_add(self.reg.y);
         self.cycles(1);
         let _ = self.read_from_page(addr);
@@ -533,12 +710,20 @@ impl Spc700 {
         self.write_to_page(addr, data);
     }
 
-    fn mov_store_addr(&mut self, reg: u8) -> () {
+    fn mov_store_addr(&mut self, opcode: u8) -> () {
+        let reg_type = match opcode {
+            0xC5 => 0,
+            0xC9 => 1,
+            0xCC => 2,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;
         let _ = self.read_ram(addr);
-        let data = match reg { 
+
+        let data = match reg_type { 
             0 => self.reg.a,
             1 => self.reg.x,
             2 => self.reg.y,    
@@ -548,7 +733,7 @@ impl Spc700 {
         self.write_ram(addr, data);
     }
 
-    fn mov_store_x_idx_addr(&mut self) -> () {
+    fn mov_store_x_idx_addr(&mut self, _opcode: u8) -> () {
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;
@@ -559,7 +744,7 @@ impl Spc700 {
         self.write_ram(addr, self.reg.a);
     }
 
-    fn mov_store_y_idx_addr(&mut self) -> () {
+    fn mov_store_y_idx_addr(&mut self, _opcode: u8) -> () {
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;
@@ -570,20 +755,20 @@ impl Spc700 {
         self.write_ram(addr, self.reg.a);
     }
 
-    fn mov_store_x_indirect_inc(&mut self) -> () {
+    fn mov_store_x_indirect_inc(&mut self, _opcode: u8) -> () {
         self.cycles(1);
         self.write_to_page(self.reg.x, self.reg.a);
         self.reg.x = self.reg.x.wrapping_add(1);
         self.cycles(1);
     }
 
-    fn mov_store_x_indirect(&mut self) -> () {
+    fn mov_store_x_indirect(&mut self, _opcode: u8) -> () {
         self.cycles(1);
         self.read_from_page(self.reg.x);
         self.write_to_page(self.reg.x, self.reg.a);        
     }
 
-    fn mov_store_x_ind_ind(&mut self) -> () {
+    fn mov_store_x_ind_ind(&mut self, _opcode: u8) -> () {
         let base_addr = self.read_from_pc().wrapping_add(self.reg.x);
         self.cycles(1);
         let lower = self.read_from_page(base_addr) as u16;
@@ -594,7 +779,7 @@ impl Spc700 {
         self.write_ram(addr, self.reg.a);
     }
 
-    fn mov_store_y_ind_ind(&mut self) -> () {
+    fn mov_store_y_ind_ind(&mut self, _opcode: u8) -> () {
         let base_addr = self.read_from_pc();
         let lower = self.read_from_page(base_addr) as u16;
         let upper = self.read_from_page(base_addr) as u16;
@@ -606,16 +791,25 @@ impl Spc700 {
         self.write_ram(addr, self.reg.a);
     }
 
-    fn mov_store_word(&mut self) -> () {
+    fn mov_store_word(&mut self, _opcode: u8) -> () {
         let addr = self.read_from_pc();
         let _ = self.read_from_page(addr);
         self.write_to_page(addr, self.reg.a);
         self.write_to_page(addr.wrapping_add(1), self.reg.y);
     }
 
-    fn push(&mut self, reg: u8) -> () {
+    fn push(&mut self, opcode: u8) -> () {
+        let reg_type = match opcode {
+            0x0D => 3,
+            0x2D => 0,
+            0x4D => 1,
+            0x6D => 2,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+
         self.cycles(1);
-        let data = match reg {
+
+        let data = match reg_type {
             0 => self.reg.a,
             1 => self.reg.x,
             2 => self.reg.y,
@@ -627,11 +821,20 @@ impl Spc700 {
         self.cycles(1);
     }
 
-    fn pop(&mut self, reg: u8) -> () {
+    fn pop(&mut self, opcode: u8) -> () {
+        let reg_type = match opcode { 
+            0x8E => 3,
+            0xAE => 0,
+            0xCE => 1,
+            0xEE => 2,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+
         self.reg.sp = self.reg.sp.wrapping_add(1);
         self.cycles(1);
         let data = self.read_from_stack();
-        match reg {
+
+        match reg_type {
             0 => self.reg.a = data,
             1 => self.reg.x = data,
             2 => self.reg.y = data,
@@ -641,31 +844,31 @@ impl Spc700 {
         self.cycles(1);
     }
 
-    fn nop(&mut self) -> () {
+    fn nop(&mut self, _opcode: u8) -> () {
         self.cycles(1);
     }
 
-    fn sleep_or_stop(&mut self) -> () {        
+    fn sleep_or_stop(&mut self, _opcode: u8) -> () {        
         self.is_stopped = true;
         self.cycles(2);
     }
 
-    fn clrp(&mut self) -> () {
+    fn clrp(&mut self, _opcode: u8) -> () {
         self.reg.psw.negate_page();
         self.cycles(1);
     }
 
-    fn setp(&mut self) -> () {
+    fn setp(&mut self, _opcode: u8) -> () {
         self.reg.psw.assert_page();
         self.cycles(1);
     }
 
-    fn ei(&mut self) -> () {
+    fn ei(&mut self, _opcode: u8) -> () {
         self.reg.psw.assert_interrupt();
         self.cycles(2);
     }
 
-    fn di(&mut self) -> () {
+    fn di(&mut self, _opcode: u8) -> () {
         self.reg.psw.negate_overflow();
         self.cycles(2);
     }
@@ -686,7 +889,7 @@ impl Spc700 {
         self.write_to_page(addr, x);
     }
 
-    fn not1(&mut self) -> () {
+    fn not1(&mut self, _opcode: u8) -> () {
         let (addr, bit_idx) = self.addr_and_idx();
         let data = self.read_ram(addr);
         let ret = data ^ (1 << bit_idx);
@@ -694,7 +897,7 @@ impl Spc700 {
         self.write_ram(addr, ret);
     }
 
-    fn mov1_to_mem(&mut self) -> () {
+    fn mov1_to_mem(&mut self, _opcode: u8) -> () {
         let (addr, bit_idx) = self.addr_and_idx();        
         let data = self.read_ram(addr);
         self.cycles(1);
@@ -708,7 +911,7 @@ impl Spc700 {
         self.write_ram(addr, ret);        
     }
 
-    fn mov1_to_psw(&mut self) -> () {
+    fn mov1_to_psw(&mut self, _opcode: u8) -> () {
         let (addr, bit_idx) = self.addr_and_idx();
         let data = self.read_ram(addr);
         let carry = (data >> bit_idx) & 1;
@@ -736,7 +939,7 @@ impl Spc700 {
         self.reg.psw.set_carry(ret);
     }
 
-    fn eor1(&mut self) -> () {
+    fn eor1(&mut self, _opcode: u8) -> () {
         let (addr, bit_idx) = self.addr_and_idx();
         let data = self.read_ram(addr);
         let bit = ((data >> bit_idx) & 1) == 1;        
@@ -746,22 +949,22 @@ impl Spc700 {
         self.reg.psw.set_carry(ret);
     }
 
-    fn clrc(&mut self) -> () {
+    fn clrc(&mut self, _opcode: u8) -> () {
         self.cycles(1);
         self.reg.psw.set_carry(false);
     }
 
-    fn setc(&mut self) -> () {
+    fn setc(&mut self, _opcode: u8) -> () {
         self.cycles(1);
         self.reg.psw.set_carry(true);
     }
 
-    fn notc(&mut self) -> () {
+    fn notc(&mut self, _opcode: u8) -> () {
         self.cycles(2);
         self.reg.psw.set_carry(!self.reg.psw.carry());
     }
 
-    fn clrv(&mut self) -> () {
+    fn clrv(&mut self, _opcode: u8) -> () {
         self.cycles(1);
         self.reg.psw.set_overflow(false);
         self.reg.psw.set_half(false);
@@ -837,7 +1040,7 @@ impl Spc700 {
         }
     }
 
-    fn dbnz_y(&mut self) -> () {
+    fn dbnz_y(&mut self, _opcode: u8) -> () {
         let rr = self.read_from_pc() as u16;
         self.reg.y = self.reg.y.wrapping_sub(1);
         self.cycles(2);
@@ -849,7 +1052,7 @@ impl Spc700 {
         }
     }
 
-    fn dbnz_data(&mut self) -> () {
+    fn dbnz_data(&mut self, _opcode: u8) -> () {
         let addr = self.read_from_pc();
         let rr = self.read_from_pc() as u16;
         let data = self.read_from_page(addr).wrapping_sub(1);        
@@ -863,14 +1066,14 @@ impl Spc700 {
         }
     }
 
-    fn bra(&mut self) -> () {
+    fn bra(&mut self, _opcode: u8) -> () {
         let rr = self.read_from_pc() as u16;
         self.cycles(2);
         let offset = if (rr & 0x80) != 0 { 0xFF00 | rr } else { rr };
         self.reg.pc = self.reg.pc.wrapping_add(offset);
     }
 
-    fn jmp_abs(&mut self) -> () {
+    fn jmp_abs(&mut self, _opcode: u8) -> () {
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;
@@ -878,7 +1081,7 @@ impl Spc700 {
         self.reg.pc = addr;
     }
 
-    fn jmp_abs_x(&mut self) -> () {
+    fn jmp_abs_x(&mut self, _opcode: u8) -> () {
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;
@@ -891,7 +1094,7 @@ impl Spc700 {
         self.reg.pc = (dst_upper << 8) | dst_lower;
     }
     
-    fn call(&mut self) -> () {
+    fn call(&mut self, _opcode: u8) -> () {
         let dst_lower = self.read_from_pc() as u16;
         let dst_upper = self.read_from_pc() as u16;
         let dst = (dst_upper << 8) | dst_lower;
@@ -929,7 +1132,7 @@ impl Spc700 {
         self.reg.pc = next_pc;
     }
 
-    fn pcall(&mut self) -> () {        
+    fn pcall(&mut self, _opcode: u8) -> () {        
         let lower = self.read_from_pc() as u16;
         let next_pc = 0xFF00 | lower;
 
@@ -946,7 +1149,7 @@ impl Spc700 {
         self.reg.pc = next_pc;
     }
 
-    fn ret(&mut self) -> () {
+    fn ret(&mut self, _opcode: u8) -> () {
         let partial_pcs: Vec<u8> = (0..2).map(|_| {
             self.reg.sp = self.reg.sp.wrapping_add(1);
             self.cycles(1);
@@ -962,7 +1165,7 @@ impl Spc700 {
         self.reg.pc = next_pc;
     }
 
-    fn ret1(&mut self) -> () {
+    fn ret1(&mut self, _opcode: u8) -> () {
         let psw = self.read_from_stack();
         self.reg.sp = self.reg.sp.wrapping_add(1);
         self.reg.psw.set(psw);
@@ -978,7 +1181,7 @@ impl Spc700 {
         self.reg.pc = (upper_pc << 8) | (lower_pc)
     }
 
-    fn brk(&mut self) -> () {
+    fn brk(&mut self, _opcode: u8) -> () {
         let lower = self.read_ram(0xFFDE) as u16;
         let upper = self.read_ram(0xFFDF) as u16;
         let next_pc = (upper << 8) | lower;
@@ -998,10 +1201,45 @@ impl Spc700 {
         self.reg.pc = next_pc;
     }    
 
-    fn alu_dp(&mut self, from: u8, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+    fn fetch_alu_op(opcode: u8) -> fn(&mut Register, u8, u8) -> u8 {
+        let upper = (opcode >> 4) & 0x0F;
+        match upper {
+            0x0 | 0x1 => or,
+            0x2 | 0x3 => and,
+            0x4 | 0x5 => eor,
+            0x6 | 0x7 => cmp,
+            0x8 | 0x9 => adc,
+            0xA | 0xB => sbc,
+            _ if opcode == 0xC8 => cmp,
+            _ => panic!("upper must be between 0x0 to 0xB. actual {:#04x}", upper),
+        } 
+    }
+
+    fn fetch_shift_op(opcode: u8) -> fn(u8, bool) -> (u8, bool) {
+        let upper = (opcode >> 4) & 0x0F;
+        match upper {
+            0x0 | 0x1 => asl,
+            0x2 | 0x3 => rol,
+            0x4 | 0x5 => lsr,
+            0x6 | 0x7 => ror,
+            _ => panic!("upper expects to be between 0 to 7. actual: {:#04x}", upper),
+        }
+    }
+
+    fn alu_dp(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_alu_op(opcode);
+        let upper = (opcode >> 4) & 0x0F;
+        let lower = opcode & 0x0F;
+        let reg_type = match (upper, lower) {
+            (upper, 0x4) if upper % 2 == 0 => 0,
+            (0x3, 0xE) => 1,
+            (0x7, 0xE) => 2,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+
         let addr = self.read_from_pc();        
         let b = self.read_from_page(addr);
-        let a = match from {
+        let a = match reg_type {
             0 => self.reg.a,
             1 => self.reg.x,
             2 => self.reg.y,
@@ -1011,13 +1249,23 @@ impl Spc700 {
         self.reg.a = op(&mut self.reg, a, b);        
     }
 
-    fn alu_addr(&mut self, from: u8, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {        
+    fn alu_addr(&mut self, opcode: u8) -> () {        
+        let op = Spc700::fetch_alu_op(opcode);
+        let op_upper = (opcode >> 4) & 0x0F;
+        let op_lower = opcode & 0x0F;
+        let reg_type = match (op_upper, op_lower) {
+            (upper, 0x5) if upper % 2 == 0 => 0,
+            (0x1, 0xE) => 1,
+            (0x5, 0xE) => 2,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+        
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;
 
         let b = self.read_ram(addr);
-        let a = match from {
+        let a = match reg_type {
             0 => self.reg.a,
             1 => self.reg.x,
             2 => self.reg.y,
@@ -1027,7 +1275,8 @@ impl Spc700 {
         self.reg.a = op(&mut self.reg, a, b);        
     }
 
-    fn alu_indirect_x(&mut self, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+    fn alu_indirect_x(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_alu_op(opcode);
         let x = self.reg.x;
         self.cycles(1);
 
@@ -1038,7 +1287,8 @@ impl Spc700 {
         self.reg.a = data;        
     }
 
-    fn alu_x_idx_indirect(&mut self, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+    fn alu_x_idx_indirect(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_alu_op(opcode);
         let addr = self.read_from_pc().wrapping_add(self.reg.x);
         self.cycles(1);
         
@@ -1049,7 +1299,8 @@ impl Spc700 {
         self.reg.a = ret;        
     }
 
-    fn alu_x_idx_addr(&mut self, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+    fn alu_x_idx_addr(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_alu_op(opcode);
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;
@@ -1063,7 +1314,8 @@ impl Spc700 {
         self.reg.a = ret;
     }
 
-    fn alu_x_ind_ind(&mut self, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+    fn alu_x_ind_ind(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_alu_op(opcode);
         let base_addr = self.read_from_pc().wrapping_add(self.reg.x);        
         self.cycles(1);
         let lower = self.read_from_page(base_addr) as u16;
@@ -1077,7 +1329,8 @@ impl Spc700 {
         self.reg.a = ret;
     }
 
-    fn alu_y_ind_ind(&mut self, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+    fn alu_y_ind_ind(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_alu_op(opcode);
         let base_addr = self.read_from_pc();
         let lower = self.read_from_page(base_addr) as u16;
         let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;        
@@ -1092,7 +1345,8 @@ impl Spc700 {
         self.reg.a = ret;
     }
 
-    fn alu_y_idx_addr(&mut self, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+    fn alu_y_idx_addr(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_alu_op(opcode);
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;
@@ -1106,21 +1360,36 @@ impl Spc700 {
         self.reg.a = ret;
     }
 
-    fn alu_x_y(&mut self, is_cmp: bool, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+    fn alu_x_y(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_alu_op(opcode);
+        let op_upper = (opcode >> 4) & 0x0F;
+        let is_cmp_op = op_upper == 0x6 || op_upper == 0x7;
+
         self.cycles(1);
         let x_data = self.read_from_page(self.reg.x);        
         let y_data = self.read_from_page(self.reg.y);
         let ret = op(&mut self.reg, x_data, y_data);        
 
-        if !is_cmp {
+        if !is_cmp_op {
             self.write_to_page(self.reg.x, ret);
         } else {
             self.cycles(1)
         }
     }
 
-    fn alu_imm(&mut self, from: u8, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
-        let a = match from {
+    // TODO 取得及び書き込むレジスタの種類を数字ではなくenum値で表現するように変更する
+    fn alu_imm(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_alu_op(opcode);
+        let upper = (opcode >> 4) & 0x0F;
+        let lower = opcode & 0x0F;
+        let reg_type = match (upper, lower) {
+            (upper, 0x8) if upper <= 0xB => 0,
+            (0xC, 0x8) => 1,
+            (0xA, 0xD) => 2, 
+            _ => panic!("unknown opcode combination: {:x}", opcode),
+        };
+
+        let a = match reg_type {
             0 => self.reg.a,
             1 => self.reg.x,
             2 => self.reg.y,
@@ -1129,29 +1398,36 @@ impl Spc700 {
 
         let b = self.read_from_pc();
         let ret = op(&mut self.reg, a, b);
-
-        match from {
+        match reg_type {
             0 => self.reg.a = ret,
             1 => self.reg.x = ret,
             2 => self.reg.y = ret,
             _ => panic!("from register types must be between 0 to 2"),
-        };        
+        };
     }
 
-    fn alu_dp_imm(&mut self, is_cmp: bool, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+    fn alu_dp_imm(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_alu_op(opcode);
+        let op_upper = (opcode >> 4) & 0x0F;
+        let is_cmp_op = op_upper == 0x6 || op_upper == 0x7; 
+
         let imm = self.read_from_pc();
         let addr = self.read_from_pc();
         let data = self.read_from_page(addr);
         let ret = op(&mut self.reg, data, imm);
 
-        if !is_cmp {
+        if !is_cmp_op {
             self.write_to_page(addr, ret);
         } else {
             self.cycles(1);
         }
     }
 
-    fn alu_dp_dp(&mut self, is_cmp: bool, op: impl Fn(&mut Register, u8, u8) -> u8) -> () {
+    fn alu_dp_dp(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_alu_op(opcode);
+        let op_upper = (opcode >> 4) & 0x0F;
+        let is_cmp_op = op_upper == 0x6 || op_upper == 0x7; 
+
         let bb = self.read_from_pc();
         let b = self.read_from_page(bb);
         let aa = self.read_from_pc();        
@@ -1159,21 +1435,25 @@ impl Spc700 {
 
         let ret = op(&mut self.reg, a, b);
 
-        if !is_cmp {
+        if !is_cmp_op {
             self.write_to_page(aa, ret);
         } else {
             self.cycles(1);
         } 
     }
 
-    fn shift_acc(&mut self, opcode: u8, op: impl Fn(u8, bool) -> (u8, bool)) -> () {
+    fn shift_acc(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_shift_op(opcode);
+
         self.cycles(1);
         let ret = self.shift(opcode, self.reg.a, op);
         
         self.reg.a = ret;        
     }
 
-    fn shift_dp(&mut self, opcode: u8, op: impl Fn(u8, bool) -> (u8,bool)) -> () {
+    fn shift_dp(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_shift_op(opcode);
+
         let addr = self.read_from_pc();
         let data = self.read_from_page(addr);        
         let ret = self.shift(opcode, data, op);
@@ -1181,7 +1461,9 @@ impl Spc700 {
         self.write_to_page(addr, ret);
     }
 
-    fn shift_x_idx_indirect(&mut self, opcode: u8, op: impl Fn(u8, bool) -> (u8, bool)) -> () {
+    fn shift_x_idx_indirect(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_shift_op(opcode);
+
         let addr = self.read_from_pc().wrapping_add(self.reg.x);
         self.cycles(1);
 
@@ -1191,7 +1473,9 @@ impl Spc700 {
         self.write_to_page(addr, ret);
     }
 
-    fn shift_addr(&mut self, opcode: u8, op: impl Fn(u8, bool) -> (u8, bool)) -> () {
+    fn shift_addr(&mut self, opcode: u8) -> () {
+        let op = Spc700::fetch_shift_op(opcode);
+
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;
@@ -1216,27 +1500,33 @@ impl Spc700 {
         data
     }
 
-    fn inc_dec_reg(&mut self, opcode: u8, reg_type: u8) -> () {
+    fn inc_dec_reg(&mut self, opcode: u8) -> () {
         self.cycles(1);
-
         let is_inc = (opcode & 0x20) != 0;
+        let upper = (opcode >> 4) & 0x0F;
+        let lower = opcode & 0x0F;
+        let reg_type = match (upper, lower) {
+            (0x9, 0xC) => 0,
+            (0xB, 0xC) => 0,
+            (0xD, 0xC) => 2,
+            (0xF, 0xC) => 2,
+            (0x1, 0xD) => 1,
+            (0x3, 0xD) => 1,
+            _ => panic!("unexpected opcode: {}", opcode),
+        };
+
         let data = match reg_type {
-            0 => self.reg.a,
-            1 => self.reg.x,
-            2 => self.reg.y,
-            _ => panic!("require 0 to 2 as register type"),
+            0 => &mut self.reg.a,
+            1 => &mut self.reg.x,
+            2 => &mut self.reg.y,
+            _ => panic!("expect 0 to 2 as register type"),
         };
 
         let ret =
             if is_inc { data.wrapping_add(1) }
             else      { data.wrapping_sub(1) };
 
-        match reg_type {
-            0 => self.reg.a = ret,
-            1 => self.reg.x = ret,
-            2 => self.reg.y = ret,
-            _ => panic!("require 0 to 2 as register type"),
-        }
+        *data = ret;
 
         self.set_inc_dec_flag(ret);
     }
@@ -1290,7 +1580,7 @@ impl Spc700 {
         self.reg.psw.set_zero(is_zero);
     }
 
-    fn addw(&mut self) -> () {
+    fn addw(&mut self, _opcode: u8) -> () {
         self.reg.psw.negate_carry();
 
         let (ya, word) = self.get_word_operands();        
@@ -1304,7 +1594,7 @@ impl Spc700 {
         self.reg.psw.set_zero(ret == 0);
     }
 
-    fn subw(&mut self) -> () {
+    fn subw(&mut self, _opcode: u8) -> () {
         self.reg.psw.assert_carry();
 
         let (ya, word) = self.get_word_operands();
@@ -1318,7 +1608,7 @@ impl Spc700 {
         self.reg.psw.set_zero(ret == 0);
     }
 
-    fn cmpw(&mut self) -> () {
+    fn cmpw(&mut self, _opcode: u8) -> () {
         let (ya, word) = self.get_word_operands();
         let ret = (ya as i32) - (word as i32);
 
@@ -1327,11 +1617,17 @@ impl Spc700 {
         self.reg.psw.set_carry(ret >= 0);
     }
 
-    fn inc_dec_word(&mut self, x: u16) -> () {
+    fn inc_dec_word(&mut self, opcode: u8) -> () {
         let addr = self.read_from_pc();
+        let upper = (opcode >> 4) & 0x0F;
+        let operand = match upper {
+            0x1 => 0xFFFF,
+            0x3 => 0x0001,
+            _   => panic!("unexpected opcode: {}", opcode),
+        };
 
         let word_lower = self.read_from_page(addr) as u16;                
-        let lower_result = word_lower.wrapping_add(x); 
+        let lower_result = word_lower.wrapping_add(operand); 
         let lower_carry = lower_result >> 8;
         self.write_to_page(addr, lower_result as u8);
 
@@ -1345,7 +1641,7 @@ impl Spc700 {
         self.reg.psw.set_sign((result & 0x8000) != 0);
     }
 
-    fn div(&mut self) -> () {
+    fn div(&mut self, _opcode: u8) -> () {
         self.cycles(11);
         let ya = self.reg.ya();
         let x = self.reg.x as u16;
@@ -1365,7 +1661,7 @@ impl Spc700 {
         self.reg.psw.set_sign((self.reg.a & 0x80) != 0);
     }
 
-    fn mul(&mut self) -> () {
+    fn mul(&mut self, _opcode: u8) -> () {
         self.cycles(8);
         let ya = (self.reg.y as u16) * (self.reg.a as u16);
         self.reg.set_ya(ya);
@@ -1384,7 +1680,7 @@ impl Spc700 {
         (ya, word)
     }
 
-    fn daa(&mut self) -> () {
+    fn daa(&mut self, _opcode: u8) -> () {
         self.cycles(2);
         if self.reg.psw.carry() || self.reg.a > 0x99 {
             self.reg.a = self.reg.a.wrapping_add(0x60);
@@ -1398,7 +1694,7 @@ impl Spc700 {
         self.reg.psw.set_sign((self.reg.a & 0x80) != 0);
     }
 
-    fn das(&mut self) -> () {
+    fn das(&mut self, _opcode: u8) -> () {
         self.cycles(2);
         if !self.reg.psw.carry() || self.reg.a > 0x99 {
             self.reg.a = self.reg.a.wrapping_sub(0x60);
@@ -1412,7 +1708,7 @@ impl Spc700 {
         self.reg.psw.set_sign((self.reg.a & 0x80) != 0);
     }
 
-    fn xcn(&mut self) -> () {
+    fn xcn(&mut self, _opcode: u8) -> () {
         self.cycles(4);
         self.reg.a = (self.reg.a >> 4) | ((self.reg.a & 0x0F) << 4);
 
@@ -1420,7 +1716,7 @@ impl Spc700 {
         self.reg.psw.set_sign((self.reg.a & 0x80) != 0); 
     }
 
-    fn tclr1(&mut self) -> () {
+    fn tclr1(&mut self, _opcode: u8) -> () {
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;
@@ -1436,7 +1732,7 @@ impl Spc700 {
 
     }
 
-    fn tset1(&mut self) -> () {
+    fn tset1(&mut self, _opcode: u8) -> () {
         let lower = self.read_from_pc() as u16;
         let upper = self.read_from_pc() as u16;
         let addr = (upper << 8) | lower;
