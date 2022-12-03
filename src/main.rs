@@ -2,21 +2,25 @@ pub mod dsp;
 pub mod emulator;
 pub mod amp;
 
-use emulator::core::Spc700;
-use std::env;
-use std::io::{Error, ErrorKind};
-use std::path::Path;
 use std::result::Result;
+use emulator::core::Spc700;
+use std::io::Error;
+use std::path::Path;
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let result = match args.get(1) {
-        None => Result::Err(Error::new(ErrorKind::Other, "filename must be specified")),
-        Some(name) => Spc700::new_with_init(Path::new(name)),
-    };
+use clap::Parser;
 
-    match result {
-        Err(err) => println!("{}", err),
-        Ok(emu) => amp::Amplifier::play(emu),
-    }
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(short, long, default_value_t = 100)]
+    duration: u64,
+
+    file: String,
+}
+
+fn main() -> Result<(), Error> {
+    let args = Args::parse();
+    let emulator = Spc700::new_with_init(Path::new(&args.file))?;
+    amp::Amplifier::play(emulator, args.duration);
+
+    Ok(())
 }

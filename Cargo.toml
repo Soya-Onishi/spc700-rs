@@ -8,8 +8,7 @@ edition = "2021"
 debug = 1
 
 [dependencies]
-
 spc = "0.1.1"
 cpal = "0.14"
 hound = "3.5"
-clap = "4.0" 
+clap = { version = "4.0", features = ["derive"] }

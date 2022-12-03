@@ -13,7 +13,7 @@ const BUFFER_SIZE: usize = INPUT_SAMPLING_RATE * 8;
 
 pub struct Amplifier;
 impl Amplifier {
-  pub fn play(core: Spc700) {
+  pub fn play(core: Spc700, duration: u64) {
     let device = cpal::default_host().default_output_device().expect("no output device available");
 
     // 32000Hzの再生に対応しているconfigを探す。
@@ -44,7 +44,7 @@ impl Amplifier {
 
     stream.play().unwrap();
 
-    thread::sleep(std::time::Duration::from_millis(100));
+    thread::sleep(std::time::Duration::from_millis(duration));
   }
 }
 
@@ -61,7 +61,13 @@ fn build_stream<T: cpal::Sample + std::marker::Send + 'static>(
     loop {
       let (left, right) = core.next_sample();
       let output = ((left as i32 + right as i32) / 2) as i16;
-      tx.send(T::from(&output)).unwrap();
+      match tx.send(T::from(&output)) {
+        Ok(_) => {},
+        Err(err) => { 
+          println!("{:?}", err);
+          std::process::exit(0);
+        },
+      }
     } 
   });
 
