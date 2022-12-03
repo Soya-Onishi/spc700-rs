@@ -10,6 +10,7 @@
 
 target/
 test/
+Cargo.lock
 *.wav
 *.txt
 *.json
