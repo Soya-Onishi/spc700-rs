@@ -1212,7 +1212,6 @@ impl Spc700 {
             0x6 | 0x7 => cmp,
             0x8 | 0x9 => adc,
             0xA | 0xB => sbc,
-            _ if opcode == 0xC8 => cmp,
             _ => panic!("upper must be between 0x0 to 0xB. actual {:#04x}", upper),
         } 
     }
@@ -1229,7 +1228,11 @@ impl Spc700 {
     }
 
     fn alu_dp(&mut self, opcode: u8) -> () {
-        let op = Spc700::fetch_alu_op(opcode);
+        let op = match opcode {
+            0x3E => cmp,
+            0x7E => cmp,
+               _ => Spc700::fetch_alu_op(opcode),
+        };
         let upper = (opcode >> 4) & 0x0F;
         let lower = opcode & 0x0F;
         let reg_type = match (upper, lower) {
@@ -1252,7 +1255,11 @@ impl Spc700 {
     }
 
     fn alu_addr(&mut self, opcode: u8) -> () {        
-        let op = Spc700::fetch_alu_op(opcode);
+        let op = match opcode {
+            0x1E => cmp,
+            0x5E => cmp, 
+               _ => Spc700::fetch_alu_op(opcode),
+        };
         let op_upper = (opcode >> 4) & 0x0F;
         let op_lower = opcode & 0x0F;
         let reg_type = match (op_upper, op_lower) {
@@ -1381,7 +1388,11 @@ impl Spc700 {
 
     // TODO 取得及び書き込むレジスタの種類を数字ではなくenum値で表現するように変更する
     fn alu_imm(&mut self, opcode: u8) -> () {
-        let op = Spc700::fetch_alu_op(opcode);
+        let op = match opcode {
+            0xC8 => cmp,
+            0xAD => cmp,
+            _ => Spc700::fetch_alu_op(opcode)
+        };
         let upper = (opcode >> 4) & 0x0F;
         let lower = opcode & 0x0F;
         let reg_type = match (upper, lower) {
