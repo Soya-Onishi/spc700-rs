@@ -8,6 +8,7 @@ use std::io::Error;
 use std::path::Path;
 
 use clap::Parser;
+use std::io::Write;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -18,7 +19,14 @@ struct Args {
 }
 
 fn main() -> Result<(), Error> {
-    let args = Args::parse();
+    let args = Args::parse(); 
+    env_logger::builder()
+        .format(|buf, record| {
+            writeln!(buf, "{}: {}", record.level(), record.args())
+        })
+        .init();
+    log::info!("env logger initialized");
+
     let emulator = Spc700::new_with_init(Path::new(&args.file))?;
     amp::Amplifier::play(emulator, args.duration);
 

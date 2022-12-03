@@ -414,6 +414,8 @@ impl Spc700 {
         let opcode = self.read_ram(pc);                
         let instruction = DECODE_TABLE[opcode as usize];
         instruction(self, opcode);
+        
+        log::debug!("{}", &self.reg);
 
         self.dsp.flush(&mut self.ram);  // flush in force                                        
     }

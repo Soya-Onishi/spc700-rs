@@ -2,9 +2,13 @@ mod flags;
 
 extern crate spc;
 
+use std::fmt;
+use std::fmt::Display;
+
 pub use self::flags::Flags;
 use spc::spc::Spc;
 
+#[derive(Debug)]
 pub struct Register {
     pub a: u8,
     pub x: u8,
@@ -12,6 +16,16 @@ pub struct Register {
     pub sp: u8,
     pub psw: Flags,
     pub pc: u16,
+}
+
+impl Display for Register {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f, 
+            "a: {:04x}, x: {:04x}, y: {:04x}, sp: {:04x}, psw: {:010b}, pc: {:06x}",
+            self.a, self.x, self.y, self.sp, self.psw.get(), self.pc
+        )
+    }
 }
 
 impl Register {

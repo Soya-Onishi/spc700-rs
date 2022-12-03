@@ -106,6 +106,8 @@ impl Ram {
     }
 
     pub fn read(&mut self, addr: u16, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {
+        log::debug!("ram[r] addr: {:06x}", addr);
+
         match addr {
             0x0000..=0x00EF => self.ram[addr as usize],         // RAM (typically used for CPU pointers/variables)
             0x00F0..=0x00FF => self.read_from_io(addr as usize, dsp, timer),  // I/O Ports (writes are also passed to RAM)
@@ -138,6 +140,8 @@ impl Ram {
     }
 
     pub fn write(&mut self, addr: u16, data: u8, dsp: &mut DSP, timer: &mut [Timer; 3]) -> () {
+        log::debug!("ram[w] addr: {:06x}, data: {:04x}", addr, data);
+
         match addr {
             0x0000..=0x00EF => self.ram[addr as usize] = data,         // RAM (typically used for CPU pointers/variables)
             0x00F0..=0x00FF => self.write_to_io(addr as usize, data, dsp, timer),  // I/O Ports (writes are also passed to RAM)
