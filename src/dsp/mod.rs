@@ -782,9 +782,9 @@ fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], s
 
 // TODO: need echo accumulate implementation
 fn combine_all_sample(blocks: &Vec<DSPBlock>, dsp: &DSP) -> (i16, i16) {
-    let f = |samples: Vec<i16>, master_vol: i8| -> i16 {
-        let acc: i32 = samples.iter().fold(0, |acc, &sample| {
-            let sum = acc + (sample as i32);
+    fn combine(samples: impl Iterator<Item = i32>, master_vol: i8) -> i16 {
+        let acc: i32 = samples.fold(0, |acc, sample| {
+            let sum = acc + sample;
             sum.min(0x7FFF).max(-0x8000)
         });
 
@@ -792,32 +792,32 @@ fn combine_all_sample(blocks: &Vec<DSPBlock>, dsp: &DSP) -> (i16, i16) {
         let out = out.min(0x7FFF).max(-0x8000); 
 
         out as i16
-    };
+    }
 
     if dsp.is_mute {
         (0, 0)
     } else {
-        let lefts: Vec<i16> = blocks.iter().map(|blk| blk.sample_left).collect();
-        let rights: Vec<i16> = blocks.iter().map(|blk| blk.sample_right).collect();
-        let left = f(lefts, dsp.master_vol_left as i8);
-        let right = f(rights, dsp.master_vol_right as i8);
+        let lefts = blocks.iter().map(|blk| blk.sample_left as i32);
+        let rights = blocks.iter().map(|blk| blk.sample_right as i32);
+        let left = combine(lefts, dsp.master_vol_left as i8);
+        let right = combine(rights, dsp.master_vol_right as i8);
 
         (left, right)
     } 
 }
 
 fn combine_echo(blocks: &Vec<DSPBlock>) -> (i16, i16) {
-    let f = |samples: Vec<i16>| -> i32 {
-        samples.iter().fold(0, |acc, &sample| {
-            let sum = acc + (sample as i32);
+    fn combine(samples: impl Iterator<Item = i32>) -> i32 {
+        samples.fold(0, |acc, sample| {
+            let sum = acc + sample;
             sum.min(0x7FFF).max(-0x8000)
         })
-    };
+    }
 
-    let lefts: Vec<i16> = blocks.iter().map(|blk| blk.echo_left).collect();
-    let rights: Vec<i16> = blocks.iter().map(|blk| blk.echo_right).collect();
-    let left = f(lefts);
-    let right = f(rights);
+    let lefts = blocks.iter().map(|blk| blk.echo_left as i32);
+    let rights = blocks.iter().map(|blk| blk.echo_right as i32);
+    let left = combine(lefts);
+    let right = combine(rights);
 
     (left as i16, right as i16)
 }
