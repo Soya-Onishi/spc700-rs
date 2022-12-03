@@ -80,7 +80,7 @@ impl Flags {
     pub fn get(&self) -> u8 {
         macro_rules! convert {
             ($flag: ident) => {
-                if self.$flag { 1 } else { 0 }
+                self.$flag as u8
             };
         }
 

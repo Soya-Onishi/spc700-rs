@@ -485,21 +485,14 @@ impl Spc700 {
     }
 
     fn mov_load_dp(&mut self, opcode: u8) -> () {
-        let reg_type = match opcode {
-            0xE4 => 0,
-            0xEB => 2,
-            0xF8 => 1,
-            _ => panic!("unexpected opcode: {}", opcode),
-        };
-
         let addr = self.read_from_pc();
         let data = self.read_from_page(addr);
 
-        match reg_type {
-            0 => self.reg.a = data,
-            1 => self.reg.x = data,
-            2 => self.reg.y = data,
-            _ => panic!("register type must be between 0 to 2"),
+        match opcode {
+            0xE4 => self.reg.a = data,
+            0xF8 => self.reg.x = data,
+            0xEB => self.reg.y = data,
+            _ => panic!("unexpected opcode: {}", opcode),
         };
 
         self.set_mov_flag(data);
@@ -983,22 +976,24 @@ impl Spc700 {
     }
 
     fn branch_by_psw(&mut self, opcode: u8) -> () {
-        let rr = self.read_from_pc() as u16;        
-        let flag_type = opcode & !(0x20);
-        let require_true = (opcode & 0x20) != 0;
-        let flag = match flag_type {
-            0x10 => self.reg.psw.sign(),
-            0x50 => self.reg.psw.overflow(),
-            0x90 => self.reg.psw.carry(),
-            0xD0 => self.reg.psw.zero(),
-            _ => panic!("flag type must be between 0x10, 0x50, 0x90, 0xD0. actual: {:#04x}", flag_type),
-        };
+        let rr = self.read_from_pc();        
+        let flag_type = (opcode >> 6) & 0x03;
 
-        let branch = flag == require_true;        
+        // 各フラグ（要素順にsign, overflow, carry, zero）のみを抽出するためのマスク
+        let masks = [0x80, 0x40, 0x01, 0x02];
+        let flag = masks[flag_type as usize] & self.reg.psw.get();
+
+        // フラグに対してtrueとfalseどちらなら分岐が発生するのか
+        let branch_trigger = (opcode & 0x20) != 0;
+
+        let branch = (flag != 0) == branch_trigger;        
         if branch { 
             self.cycles(2);
-            let offset = if (rr & 0x80) != 0 { rr | 0xFF00 } else { rr };
-            self.reg.pc = self.reg.pc.wrapping_add(offset);
+            // 一旦 u8 -> i8のキャストを挟まないと、期待通りの結果が得られない
+            // 例) 0xFF as i16 => 255(0xFF), (0xFF as i8) as i16 => -1
+            let offset = (rr as i8) as i16;
+            let next_pc = (self.reg.pc as i16).wrapping_add(offset);
+            self.reg.pc = next_pc as u16;
          }
     }
 
