@@ -290,11 +290,13 @@ impl DSP {
         self.sync_counter += cycle_count
     }
 
-    pub fn flush(&mut self, ram: &mut Ram) -> () {        
-        while self.sync_counter >= 64 {
+    pub fn flush(&mut self, ram: &mut Ram) -> () {       
+        let flush_count = self.sync_counter / 64;
+        let next_sync_counter = self.sync_counter % 64; 
+        for _ in 0..flush_count {
             self.exec_flush(ram);
-            self.sync_counter -= 64;
         }
+        self.sync_counter = next_sync_counter
     }
 
     fn exec_flush(&mut self, ram: &mut Ram) -> () {        
