@@ -390,14 +390,14 @@ impl DSP {
             (  0x2, 0xC) => self.echo_vol_left,
             (  0x3, 0xC) => self.echo_vol_right,
             (  0x4, 0xC) => 0,
-            (  0x5, 0xC) => vec_to_u8(self.blocks.iter().map(|blk| blk.reg.key_off).collect()),
+            (  0x5, 0xC) => vec_to_u8(self.blocks.iter().map(|blk| blk.reg.key_off)),
             (  0x6, 0xC) => self.read_FLG(),
-            (  0x7, 0xC) => vec_to_u8(self.blocks.iter().map(|blk| blk.reg.voice_end).collect()),
+            (  0x7, 0xC) => vec_to_u8(self.blocks.iter().map(|blk| blk.reg.voice_end)),
             (  0x0, 0xD) => self.echo_feedback_volume,
             (  0x1, 0xD) => self.unused_1d,
-            (  0x2, 0xD) => vec_to_u8(self.blocks.iter().map(|blk| blk.reg.pmon_enable).collect()),
-            (  0x3, 0xD) => vec_to_u8(self.blocks.iter().map(|blk| blk.reg.noise_enable).collect()),
-            (  0x4, 0xD) => vec_to_u8(self.blocks.iter().map(|blk| blk.reg.echo_enable).collect()),
+            (  0x2, 0xD) => vec_to_u8(self.blocks.iter().map(|blk| blk.reg.pmon_enable)),
+            (  0x3, 0xD) => vec_to_u8(self.blocks.iter().map(|blk| blk.reg.noise_enable)),
+            (  0x4, 0xD) => vec_to_u8(self.blocks.iter().map(|blk| blk.reg.echo_enable)),
             (  0x5, 0xD) => self.table_addr,
             (  0x6, 0xD) => (self.echo_ring_buffer_addr >> 8) as u8,
             (  0x7, 0xD) => self.echo_buffer_size,
@@ -886,9 +886,9 @@ fn u8_to_vec(v: u8) -> Vec<bool> {
     (0..8).map(|shamt| f(v, shamt)).collect()
 }
 
-fn vec_to_u8(bools: Vec<bool>) -> u8 {
-    (0..8).fold(0, |acc, idx| {
-        let bit = (bools[idx] as u8) << (idx as u8);
-        acc | bit
-    })    
+fn vec_to_u8(bools: impl Iterator<Item = bool>) -> u8 {
+    bools.map(|b| b as u8)
+        .zip(0..)
+        .map(|(flag, idx)| flag << idx)
+        .sum()
 }
