@@ -108,18 +108,14 @@ impl Ram {
     pub fn read(&mut self, addr: u16, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {
         log::debug!("ram[r] addr: {:06x}", addr);
 
-        match addr {
-            0x0000..=0x00EF => self.ram[addr as usize],         // RAM (typically used for CPU pointers/variables)
-            0x00F0..=0x00FF => self.read_from_io(addr as usize, dsp, timer),  // I/O Ports (writes are also passed to RAM)
-            0x0100..=0x01FF => self.ram[addr as usize],         // RAM (typically used for CPU stack)            
-            0x0200..=0xFFBF => self.ram[addr as usize],         // RAM (code ,data, dir-table, brr-samples, echo-buffer, etc..)
-            0xFFC0..=0xFFFF => 
-                if self.rom_writable { 
-                    self.ram[addr as usize]
-                } else {
-                    self.rom[(addr - 0xFFC0) as usize]
-                }
+        let mut data = self.ram[addr as usize];
+        if (0x00F0..=0x00FF).contains(&addr) {
+            data = self.read_from_io(addr as usize, dsp, timer);
+        } else if(0xFFC0..=0xFFFF).contains(&addr) && !self.rom_writable {
+            data = self.rom[(addr - 0xFFC0) as usize];
         }
+
+        data
     }
 
     fn read_from_io(&mut self, addr: usize, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {     
@@ -132,7 +128,7 @@ impl Ram {
         }
 
         fn read_from_dsp(ram: &mut Ram, _addr: usize, dsp: &mut DSP, _timer: &mut [Timer; 3]) -> u8 {
-            dsp.read_from_register(ram.dsp_addr as usize, ram)
+            dsp.read_from_register(ram.dsp_addr as usize)
         }
 
         
@@ -204,7 +200,7 @@ impl Ram {
             0x00F0 => self.write_to_test(data),
             0x00F1 => self.write_to_control(data, timer), 
             0x00F2 => self.dsp_addr = data,
-            0x00F3 => dsp.write_to_register(self.dsp_addr as usize, data, self),            
+            0x00F3 => dsp.write_to_register(self.dsp_addr as usize, data),            
             0x00F4..=0x00F7 => (), // nothing to do (write to CPUIO for S-CPU(nor main CPU), but this is not functional for this emulator)
             0x00F8 => self.ram[addr] = data, // each AUXIO has no functionality
             0x00F9 => self.ram[addr] = data,

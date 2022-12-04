@@ -365,9 +365,7 @@ impl DSP {
         self.sample_right_out = clamp(right_out);
     }
 
-    pub fn read_from_register(&mut self, addr: usize, ram: &mut Ram) -> u8 {
-        // self.flush(ram);
-
+    pub fn read_from_register(&mut self, addr: usize) -> u8 {
         let upper_base = (addr >> 4) & 0xF;
         let upper = if upper_base >= 0x8 { upper_base - 0x8 } else { upper_base}; // to address mirror
         let lower = addr & 0xF;
@@ -407,7 +405,7 @@ impl DSP {
         }                
     }
 
-    pub fn write_to_register(&mut self, addr: usize, data: u8, ram: &mut Ram) -> () {                
+    pub fn write_to_register(&mut self, addr: usize, data: u8) -> () {                
         // self.flush(ram);
 
         let upper = (addr >> 4) & 0x0F;
