@@ -698,15 +698,21 @@ fn fetch_brr_nibble(nibbles: &[u8], idx: usize) -> i8 {
 }
 
 fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_info: &BRRInfo, base_idx: usize) -> () {    
+    // let nibbles = brrs.iter().map(|brr| [brr >> 4, (brr << 4) >> 4]).flatten();
     let nibbles = (0..16).map(|idx| fetch_brr_nibble(brrs, idx));    
-    
-    nibbles.zip(0..).for_each(|(nibble, idx)| {
-        let old = buffer[(base_idx + idx + SAMPLE_BUFFER_SIZE - 1) % SAMPLE_BUFFER_SIZE] as i32;
-        let older = buffer[(base_idx + idx + SAMPLE_BUFFER_SIZE - 2) % SAMPLE_BUFFER_SIZE] as i32;
+    let base_idx = base_idx as i32;
+
+    nibbles.enumerate().for_each(|(idx, nibble)| {
+        let idx = idx as i32;
+        let old = buffer[(base_idx + idx - 1).rem_euclid(SAMPLE_BUFFER_SIZE as i32) as usize] as i32;
+        let older = buffer[(base_idx + idx - 2).rem_euclid(SAMPLE_BUFFER_SIZE as i32) as usize] as i32;
 
         let shamt = brr_info.shift_amount as i32;
         let sample = if shamt > 12 {
-            (((nibble as i8) >> 3) as i32) << 11
+            // FullSNESではshamt > 12の場合は
+            // nibble = nibble >> 3との記載がある。
+            // 11の左シフトが必要か確認
+            ((nibble as i8) >> 3) as i32
         } else {
             ((nibble as i32) << shamt) >> 1
         };
@@ -731,13 +737,10 @@ fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_
             }
         };
 
-        let sample = 
-            if sample > 0x7FFF { 0x7FFF }
-            else if sample < -0x8000 { -0x8000 }
-            else { sample };        
+        let sample = sample.min(0x7FFF).max(-0x8000); 
         let sample = ((sample as i16) << 1) >> 1;       
         
-        buffer[base_idx + idx] = sample;
+        buffer[(base_idx + idx) as usize] = sample;
     });  
 }
 
