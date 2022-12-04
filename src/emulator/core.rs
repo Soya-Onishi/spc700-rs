@@ -21,7 +21,29 @@ pub struct Spc700 {
     is_stopped: bool
 }
 
-const DECODE_TABLE: [fn(&mut Spc700, u8) -> (); 256] = [
+
+struct OperationResult<T> {
+    cycles: usize,
+    ret: T
+}
+
+impl<T> OperationResult<T> {
+    fn new(ret: T, cycles: usize) -> OperationResult<T> {
+        OperationResult { cycles, ret }
+    }
+
+    fn cycles(&self) -> usize {
+        self.cycles
+    }
+}
+
+impl OperationResult<()> {
+    fn new_unit(cycles: usize) -> OperationResult<()> {
+        OperationResult::new((), cycles)
+    }
+}
+
+const DECODE_TABLE: [fn(&mut Spc700, u8) -> OperationResult<()>; 256] = [
     // upper opcode: 0x0
     // lower opcode: 0x0
     Spc700::nop,
@@ -407,22 +429,25 @@ impl Spc700 {
     
     fn clock(&mut self) -> () {
         if self.is_stopped {
-            self.cycles(2);
+            self.count_cycles(2);
             self.dsp.flush(&mut self.ram);
             return;
         }
 
         let pc = self.reg.inc_pc(1);
-        let opcode = self.read_ram(pc);                
+        let OperationResult { ret: opcode, cycles: fetch_cycles } = self.read_ram(pc);                
         let instruction = DECODE_TABLE[opcode as usize];
-        instruction(self, opcode);
+        let OperationResult { ret: _, cycles: op_cycles } = instruction(self, opcode);
+        
+        let cycles = fetch_cycles + op_cycles;
         
         log::debug!("op: {:04x}, {}", opcode, &self.reg);
 
+        self.count_cycles(cycles as u16);
         self.dsp.flush(&mut self.ram);  // flush in force                                        
     }
 
-    fn mov_reg_imm(&mut self, opcode: u8) -> () {
+    fn mov_reg_imm(&mut self, opcode: u8) -> OperationResult<()> {
         let reg_type = match opcode {
             0x8D => 2,
             0xCD => 1, 
@@ -430,7 +455,7 @@ impl Spc700 {
             _ => panic!("unexpected opcode: {}", opcode),
         };
 
-        let imm = self.read_from_pc();
+        let OperationResult{ ret: imm, cycles: read_cycles } = self.read_from_pc();
         match reg_type {
             0 => self.reg.a = imm,
             1 => self.reg.x = imm,
@@ -439,11 +464,11 @@ impl Spc700 {
         }
 
         self.set_mov_flag(imm);
+
+        OperationResult::new((), read_cycles)
     }
 
-    fn mov_reg_reg(&mut self, opcode: u8) -> () {
-        self.cycles(1);
-       
+    fn mov_reg_reg(&mut self, opcode: u8) -> OperationResult<()> { 
         let upper = (opcode >> 4) & 0x0F;
         let lower = opcode & 0x0F;
         
@@ -484,11 +509,13 @@ impl Spc700 {
         };
 
         self.set_mov_flag(data);
+
+        OperationResult::new((), 1)
     }
 
-    fn mov_load_dp<Opcode: Unsigned>(&mut self, opcode: u8) -> () {
-        let addr = self.read_from_pc();
-        let data = self.read_from_page(addr);
+    fn mov_load_dp<Opcode: Unsigned>(&mut self, opcode: u8) -> OperationResult<()> {
+        let OperationResult { ret: addr, cycles: read_pc_cycles } = self.read_from_pc();
+        let OperationResult { ret: data, cycles: read_cycles } = self.read_from_page(addr);
 
         match Opcode::to_u8() {
             0xE4 => self.reg.a = data,
@@ -498,18 +525,23 @@ impl Spc700 {
         }
 
         self.set_mov_flag(data);
+
+        OperationResult::new(
+            (),
+            read_pc_cycles + read_cycles
+        )
     }
 
-    fn mov_load_x_idx_indirect(&mut self, opcode: u8) -> () {
+    fn mov_load_x_idx_indirect(&mut self, opcode: u8) -> OperationResult<()> {
         let reg_type = match opcode {
             0xF4 => 0,
             0xFB => 2,
             _ => panic!("unexpected opcode: {}", opcode),
         };
 
-        let addr = self.read_from_pc().wrapping_add(self.reg.x);
-        let data = self.read_from_page(addr);
-        self.cycles(1);
+        let OperationResult { ret: addr, cycles: read_cycles } = self.read_from_pc();
+        let addr = addr.wrapping_add(self.reg.x);
+        let OperationResult { ret: data, cycles: read_page_cycles } = self.read_from_page(addr);
 
         match reg_type {
             0 => self.reg.a = data,
@@ -518,18 +550,22 @@ impl Spc700 {
         }
 
         self.set_mov_flag(data);
+
+        OperationResult::new((), read_cycles + read_page_cycles + 1)
     }
 
-    fn mov_load_y_idx_indirect(&mut self, _opcode: u8) -> () {
-        let addr = self.read_from_pc().wrapping_add(self.reg.y);
-        let data = self.read_from_page(addr);
-        self.cycles(1);
+    fn mov_load_y_idx_indirect(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult { ret: addr, cycles: read_cycles } = self.read_from_pc();
+        let addr = addr.wrapping_add(self.reg.y);
+        let OperationResult{ ret: data, cycles: read_page_cycles } = self.read_from_page(addr);
         self.reg.x = data;
 
         self.set_mov_flag(data);
+
+        OperationResult::new((), read_cycles + read_page_cycles + 1)
     }
 
-    fn mov_load_addr(&mut self, opcode: u8) -> () {
+    fn mov_load_addr(&mut self, opcode: u8) -> OperationResult<()> {
         let reg_type = match opcode {
             0xE5 => 0,
             0xE9 => 1,
@@ -537,10 +573,12 @@ impl Spc700 {
             _ => panic!("unexpected opcode: {}", opcode),
         };
 
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+        let OperationResult{ ret: lower, cycles: read_lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: read_upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16; 
         let addr = (upper << 8) | lower;
-        let data = self.read_ram(addr);
+        let OperationResult{ ret: data, cycles: read_cycles } = self.read_ram(addr);
 
         match reg_type {
             0 => self.reg.a = data,
@@ -550,116 +588,148 @@ impl Spc700 {
         }
 
         self.set_mov_flag(data);
+
+        OperationResult::new(
+            (),
+            read_lower_cycles + read_upper_cycles + read_cycles
+        )
     }
 
-    fn mov_load_x_idx_addr(&mut self, _opcode: u8) -> () {
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+    fn mov_load_x_idx_addr(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;    
         let addr = addr.wrapping_add(self.reg.x as u16);
-        self.cycles(1);
 
-        let data = self.read_ram(addr);
+        let OperationResult{ ret: data, cycles: read_cycles } = self.read_ram(addr);
 
         self.reg.a = data;
         self.set_mov_flag(data);
+
+        OperationResult::new(
+            (),
+            lower_cycles + upper_cycles + read_cycles + 1
+        )
     }
 
-    fn mov_load_y_idx_addr(&mut self, _opcode: u8) -> () {
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+    fn mov_load_y_idx_addr(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;    
         let addr = addr.wrapping_add(self.reg.y as u16);
-        self.cycles(1);
 
-        let data = self.read_ram(addr);
-
-        self.reg.a = data;
-        self.set_mov_flag(data);
-    }
-
-    fn mov_load_x_indirect(&mut self, _opcode: u8) -> () {
-        let data = self.read_from_page(self.reg.x);
-        self.cycles(1);
+        let OperationResult{ ret: data, cycles: read_cycles } = self.read_ram(addr);
 
         self.reg.a = data;
         self.set_mov_flag(data);
+
+        OperationResult::new(
+            (),
+            lower_cycles + upper_cycles + read_cycles + 1
+        )
     }
 
-    fn mov_load_x_indirect_inc(&mut self, _opcode: u8) -> () {
-        self.cycles(1);
-        let data = self.read_from_page(self.reg.x);
+    fn mov_load_x_indirect(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: data, cycles: read_cycles } = self.read_from_page(self.reg.x);
+
+        self.reg.a = data;
+        self.set_mov_flag(data);
+
+        OperationResult::new_unit(read_cycles + 1)
+    }
+
+    fn mov_load_x_indirect_inc(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: data, cycles: read_cycles } = self.read_from_page(self.reg.x);
         self.reg.x = self.reg.x.wrapping_add(1);
-        self.cycles(1);
 
         self.reg.a = data;
         self.set_mov_flag(data);
+
+        OperationResult::new_unit(read_cycles + 2)
     }
 
-    fn mov_load_y_ind_ind(&mut self, _opcode: u8) -> () {
-        let base_addr = self.read_from_pc();
-        let lower = self.read_from_page(base_addr) as u16;
-        let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;        
+    fn mov_load_y_ind_ind(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: base_addr, cycles: read_cycles } = self.read_from_pc();
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_page(base_addr);
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_page(base_addr.wrapping_add(1));        
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
         let addr = addr.wrapping_add(self.reg.y as u16);
-        self.cycles(1);
-        let data = self.read_ram(addr);
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_ram(addr);
 
         self.reg.a = data;
         self.set_mov_flag(data);
+
+        OperationResult::new_unit(read_cycles + lower_cycles + upper_cycles + data_cycles + 1)
     }
 
-    fn mov_load_x_ind_ind(&mut self, _opcode: u8) -> () {
-        let base_addr = self.read_from_pc().wrapping_add(self.reg.x);        
-        self.cycles(1);
-        let lower = self.read_from_page(base_addr) as u16;
-        let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;
+    fn mov_load_x_ind_ind(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: base_addr, cycles: base_addr_cycles } = self.read_from_pc();
+        let base_addr = base_addr.wrapping_add(self.reg.x);
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_page(base_addr);
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_page(base_addr.wrapping_add(1));
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
-        let data = self.read_ram(addr);
+        let OperationResult { ret: data, cycles: read_cycles } = self.read_ram(addr);
 
         self.reg.a = data;
         self.set_mov_flag(data);
+
+        OperationResult::new_unit(base_addr_cycles + lower_cycles + upper_cycles + read_cycles + 1)
     }
 
-    fn mov_load_word(&mut self, _opcode: u8) -> () {
-        let addr = self.read_from_pc();
-        let word_lower = self.read_from_page(addr) as u16;
-        let word_upper = self.read_from_page(addr.wrapping_add(1)) as u16;
-        let word = (word_upper << 8) | word_lower;
+    fn mov_load_word(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: addr, cycles: read_cycles } = self.read_from_pc();
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_page(addr);
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_page(addr.wrapping_add(1));
+        let lower = lower as u16;
+        let upper = upper as u16;
+        let word = (upper << 8) | lower;
 
         self.reg.set_ya(word);
-        self.cycles(1);
 
         let is_negative = (word & 0x8000) != 0;
         let is_zero = word == 0;
         self.reg.psw.set_sign(is_negative);
         self.reg.psw.set_zero(is_zero);
+
+        OperationResult::new_unit(read_cycles + lower_cycles + upper_cycles + 1)
     }
 
     fn set_mov_flag(&mut self, data: u8) -> () {
         let is_negative = (data & 0x80) != 0;
         let is_zero = data == 0;
         self.reg.psw.set_zero(is_zero);
-        self.reg.psw.set_sign(is_negative);
+        self.reg.psw.set_sign(is_negative); 
     }
 
-    fn mov_store_dp_imm(&mut self, _opcode: u8) -> () {
-        let imm = self.read_from_pc();
-        let addr = self.read_from_pc();
-        let _ = self.read_from_page(addr);        
+    fn mov_store_dp_imm(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: imm, cycles: imm_cycles } = self.read_from_pc();
+        let OperationResult{ ret: addr, cycles: addr_cycles } = self.read_from_pc();
+        let OperationResult{ ret: _, cycles: read_cycles } = self.read_from_page(addr);        
 
-        self.write_to_page(addr, imm);        
+        let OperationResult{ ret: _, cycles: write_cycles } = self.write_to_page(addr, imm);
+
+        OperationResult::new_unit(imm_cycles + addr_cycles + read_cycles + write_cycles)
     }
 
-    fn mov_store_dp_dp(&mut self, _opcode: u8) -> () {
-        let bb = self.read_from_pc();
-        let b = self.read_from_page(bb);
-        let aa = self.read_from_pc();        
+    fn mov_store_dp_dp(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: bb, cycles: bb_cycles } = self.read_from_pc();
+        let OperationResult{ ret: b, cycles: b_cycles } = self.read_from_page(bb);
+        let OperationResult{ ret: aa, cycles: aa_cycles } = self.read_from_pc();        
         
-        self.write_to_page(aa, b);
+        let OperationResult { ret: _, cycles: write_cycles } = self.write_to_page(aa, b);
+
+        OperationResult::new_unit(bb_cycles + b_cycles + aa_cycles + write_cycles)
     }
 
-    fn mov_store_dp_reg(&mut self, opcode: u8) -> () {
+    fn mov_store_dp_reg(&mut self, opcode: u8) -> OperationResult<()> {
         let reg_type = match opcode {
             0xC4 => 0,
             0xCB => 2,
@@ -667,8 +737,8 @@ impl Spc700 {
             _ => panic!("unexpected opcode: {}", opcode),
         };
 
-        let addr = self.read_from_pc();
-        let _ = self.read_from_page(addr);
+        let OperationResult{ ret: addr, cycles: addr_cycles } = self.read_from_pc();
+        let OperationResult{ ret: _, cycles: read_cycles } = self.read_from_page(addr);
         let data = match reg_type {
             0 => self.reg.a,
             1 => self.reg.x,
@@ -676,38 +746,44 @@ impl Spc700 {
             _ => panic!("register type must be between 0 to 2"),
         };
 
-        self.write_to_page(addr, data);
+        let OperationResult{ ret: _, cycles: write_cycles } = self.write_to_page(addr, data);
+
+        OperationResult::new_unit(addr_cycles + read_cycles + write_cycles)
     }
 
-    fn mov_store_x_idx_indirect(&mut self, opcode: u8) -> () {
+    fn mov_store_x_idx_indirect(&mut self, opcode: u8) -> OperationResult<()> {
         let reg_type = match opcode {
             0xD4 => 0,
             0xDB => 2,
             _ => panic!("unexpected opcode: {}", opcode),
         };
 
-        let addr = self.read_from_pc().wrapping_add(self.reg.x);
-        self.cycles(1);
-        let _ = self.read_from_page(addr);
+        let OperationResult{ ret: addr, cycles: read_cycles } = self.read_from_pc();
+        let addr = addr.wrapping_add(self.reg.x);
+        let OperationResult{ ret: _, cycles: page_cycles }= self.read_from_page(addr);
         let data = match reg_type {
             0 => self.reg.a,
             2 => self.reg.y,    
             _ => panic!("register type must be 0 or 2"),
         };
         
-        self.write_to_page(addr, data);
+        let OperationResult{ ret: _, cycles: write_cycles } = self.write_to_page(addr, data);
+
+        OperationResult::new_unit(read_cycles + page_cycles + write_cycles + 1)
     }
 
-    fn mov_store_y_idx_indirect(&mut self, _opcode: u8) -> () {
-        let addr = self.read_from_pc().wrapping_add(self.reg.y);
-        self.cycles(1);
-        let _ = self.read_from_page(addr);
+    fn mov_store_y_idx_indirect(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: addr, cycles: read_cycles } = self.read_from_pc();
+        let addr = addr.wrapping_add(self.reg.y);
+        let OperationResult{ ret: _, cycles: read_page_cycles } = self.read_from_page(addr);
         let data = self.reg.x;
         
-        self.write_to_page(addr, data);
+        let OperationResult{ ret: _, cycles: write_cycles } = self.write_to_page(addr, data);
+
+        OperationResult::new_unit(read_cycles + read_page_cycles + write_cycles + 1)
     }
 
-    fn mov_store_addr(&mut self, opcode: u8) -> () {
+    fn mov_store_addr(&mut self, opcode: u8) -> OperationResult<()> {
         let reg_type = match opcode {
             0xC5 => 0,
             0xC9 => 1,
@@ -715,10 +791,12 @@ impl Spc700 {
             _ => panic!("unexpected opcode: {}", opcode),
         };
 
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
-        let _ = self.read_ram(addr);
+        let OperationResult{ ret: _, cycles: read_cycles } = self.read_ram(addr);
 
         let data = match reg_type { 
             0 => self.reg.a,
@@ -727,75 +805,94 @@ impl Spc700 {
             _ => panic!("register type must be between 0 to 2"),
         };
 
-        self.write_ram(addr, data);
+        let OperationResult{ ret: _, cycles: write_cycles } = self.write_ram(addr, data);
+
+        OperationResult::new_unit(lower_cycles + upper_cycles + read_cycles + write_cycles)
     }
 
-    fn mov_store_x_idx_addr(&mut self, _opcode: u8) -> () {
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+    fn mov_store_x_idx_addr(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
         let addr = addr.wrapping_add(self.reg.x as u16);
-        self.cycles(1);
-        let _ = self.read_ram(addr);
+        let read_cycles = self.read_ram(addr).cycles();
         
-        self.write_ram(addr, self.reg.a);
+        let write_cycles = self.write_ram(addr, self.reg.a).cycles();
+
+        OperationResult::new_unit(lower_cycles + upper_cycles + read_cycles + write_cycles + 1)
     }
 
-    fn mov_store_y_idx_addr(&mut self, _opcode: u8) -> () {
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+    fn mov_store_y_idx_addr(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
         let addr = addr.wrapping_add(self.reg.y as u16);
-        self.cycles(1);
-        let _ = self.read_ram(addr);
+        let read_cycles = self.read_ram(addr).cycles();
 
-        self.write_ram(addr, self.reg.a);
+        let write_cycles = self.write_ram(addr, self.reg.a).cycles();
+
+        OperationResult::new_unit(lower_cycles + upper_cycles + read_cycles + write_cycles + 1)
     }
 
-    fn mov_store_x_indirect_inc(&mut self, _opcode: u8) -> () {
-        self.cycles(1);
-        self.write_to_page(self.reg.x, self.reg.a);
+    fn mov_store_x_indirect_inc(&mut self, _opcode: u8) -> OperationResult<()> {
+        let write_cycles = self.write_to_page(self.reg.x, self.reg.a).cycles();
         self.reg.x = self.reg.x.wrapping_add(1);
-        self.cycles(1);
+
+        OperationResult::new_unit(write_cycles + 2)
     }
 
-    fn mov_store_x_indirect(&mut self, _opcode: u8) -> () {
-        self.cycles(1);
-        self.read_from_page(self.reg.x);
-        self.write_to_page(self.reg.x, self.reg.a);        
+    fn mov_store_x_indirect(&mut self, _opcode: u8) -> OperationResult<()> {
+        let read_cycles = self.read_from_page(self.reg.x).cycles();
+        let write_cycles = self.write_to_page(self.reg.x, self.reg.a).cycles();
+
+        OperationResult::new_unit(read_cycles + write_cycles + 1)
     }
 
-    fn mov_store_x_ind_ind(&mut self, _opcode: u8) -> () {
-        let base_addr = self.read_from_pc().wrapping_add(self.reg.x);
-        self.cycles(1);
-        let lower = self.read_from_page(base_addr) as u16;
-        let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;
+    fn mov_store_x_ind_ind(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: base_addr, cycles: base_addr_cycles } = self.read_from_pc();
+        let base_addr = base_addr.wrapping_add(self.reg.x);
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_page(base_addr);
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_page(base_addr.wrapping_add(1));
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
-        let _ = self.read_ram(addr);
+        let read_cycles = self.read_ram(addr).cycles();
 
-        self.write_ram(addr, self.reg.a);
+        let write_cycles = self.write_ram(addr, self.reg.a).cycles();
+
+        let cycles = read_cycles + base_addr_cycles + lower_cycles + upper_cycles + read_cycles + write_cycles + 1;
+        OperationResult::new_unit(cycles)
     }
 
-    fn mov_store_y_ind_ind(&mut self, _opcode: u8) -> () {
-        let base_addr = self.read_from_pc();
-        let lower = self.read_from_page(base_addr) as u16;
-        let upper = self.read_from_page(base_addr) as u16;
+    fn mov_store_y_ind_ind(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: base_addr, cycles: read_pc_cycles } = self.read_from_pc();
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_page(base_addr);
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_page(base_addr);
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;        
         let addr = addr.wrapping_add(self.reg.y as u16);
-        self.cycles(1);
-        let _ = self.read_ram(addr);
+        let read_cycles = self.read_ram(addr).cycles();
         
-        self.write_ram(addr, self.reg.a);
+        let write_cycles = self.write_ram(addr, self.reg.a).cycles();
+
+        OperationResult::new_unit(read_pc_cycles + lower_cycles + upper_cycles + read_cycles + write_cycles + 1)
     }
 
-    fn mov_store_word(&mut self, _opcode: u8) -> () {
-        let addr = self.read_from_pc();
-        let _ = self.read_from_page(addr);
-        self.write_to_page(addr, self.reg.a);
-        self.write_to_page(addr.wrapping_add(1), self.reg.y);
+    fn mov_store_word(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: addr, cycles: read_cycles } = self.read_from_pc();
+        let read_page_cycles = self.read_from_page(addr).cycles();
+        let write_cycles_a = self.write_to_page(addr, self.reg.a).cycles();
+        let write_cycles_y = self.write_to_page(addr.wrapping_add(1), self.reg.y).cycles();
+
+        OperationResult::new_unit(read_cycles + read_page_cycles + write_cycles_a + write_cycles_y)
     }
 
-    fn push(&mut self, opcode: u8) -> () {
+    fn push(&mut self, opcode: u8) -> OperationResult<()> {
         let reg_type = match opcode {
             0x0D => 3,
             0x2D => 0,
@@ -803,9 +900,7 @@ impl Spc700 {
             0x6D => 2,
             _ => panic!("unexpected opcode: {}", opcode),
         };
-
-        self.cycles(1);
-
+        
         let data = match reg_type {
             0 => self.reg.a,
             1 => self.reg.x,
@@ -813,12 +908,14 @@ impl Spc700 {
             3 => self.reg.psw.get(),
             _ => panic!("register type must be between 0 to 3"),
         };
-        self.write_to_stack(data);
+
+        let write_cycles = self.write_to_stack(data).cycles();
         self.reg.sp = self.reg.sp.wrapping_sub(1);
-        self.cycles(1);
+
+        OperationResult::new_unit(write_cycles + 2)
     }
 
-    fn pop(&mut self, opcode: u8) -> () {
+    fn pop(&mut self, opcode: u8) -> OperationResult<()> {
         let reg_type = match opcode { 
             0x8E => 3,
             0xAE => 0,
@@ -828,8 +925,7 @@ impl Spc700 {
         };
 
         self.reg.sp = self.reg.sp.wrapping_add(1);
-        self.cycles(1);
-        let data = self.read_from_stack();
+        let OperationResult{ ret: data, cycles: read_cycles } = self.read_from_stack();
 
         match reg_type {
             0 => self.reg.a = data,
@@ -838,66 +934,74 @@ impl Spc700 {
             3 => self.reg.psw.set(data),
             _ => panic!("register type must be between 0 to 3"),
         };
-        self.cycles(1);
+
+        OperationResult::new_unit(read_cycles + 2)
     }
 
-    fn nop(&mut self, _opcode: u8) -> () {
-        self.cycles(1);
+    fn nop(&mut self, _opcode: u8) -> OperationResult<()> {
+        OperationResult::new_unit(1)
     }
 
-    fn sleep_or_stop(&mut self, _opcode: u8) -> () {        
+    fn sleep_or_stop(&mut self, _opcode: u8) -> OperationResult<()> {        
         self.is_stopped = true;
-        self.cycles(2);
+        OperationResult::new_unit(2)
     }
 
-    fn clrp(&mut self, _opcode: u8) -> () {
+    fn clrp(&mut self, _opcode: u8) -> OperationResult<()> {
         self.reg.psw.negate_page();
-        self.cycles(1);
+        OperationResult::new_unit(1)
     }
 
-    fn setp(&mut self, _opcode: u8) -> () {
+    fn setp(&mut self, _opcode: u8) -> OperationResult<()> {
         self.reg.psw.assert_page();
-        self.cycles(1);
+        OperationResult::new_unit(1)
     }
 
-    fn ei(&mut self, _opcode: u8) -> () {
+    fn ei(&mut self, _opcode: u8) -> OperationResult<()> {
         self.reg.psw.assert_interrupt();
-        self.cycles(2);
+        OperationResult::new_unit(2)
     }
 
-    fn di(&mut self, _opcode: u8) -> () {
+    fn di(&mut self, _opcode: u8) -> OperationResult<()> {
         self.reg.psw.negate_overflow();
-        self.cycles(2);
+        OperationResult::new_unit(2)
     }
 
-    fn set1(&mut self, opcode: u8) -> () {
-        let addr = self.read_from_pc();
+    fn set1(&mut self, opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: addr, cycles: read_cycles } = self.read_from_pc();
         let shamt = (opcode >> 5) & 1;
-        let x = self.read_from_page(addr) | (1 << shamt);
+        let OperationResult{ ret: data, cycles: read_page_cycles } = self.read_from_page(addr);
+        let x = data | (1 << shamt);
 
-        self.write_to_page(addr, x);        
+        let write_cycles = self.write_to_page(addr, x).cycles();
+
+        OperationResult::new_unit(read_cycles + read_page_cycles + write_cycles)
     }
 
-    fn clr1(&mut self, opcode: u8) -> () {
-        let addr = self.read_from_pc();
+    fn clr1(&mut self, opcode: u8) -> OperationResult<()> {
+        let OperationResult { ret: addr, cycles: read_cycles } = self.read_from_pc();
         let shamt = (opcode >> 5) & 1;
-        let x = self.read_from_page(addr) & !(1 << shamt);
+        let OperationResult { ret: data, cycles: read_page_cycles } = self.read_from_page(addr);
+        let x = data & !(1 << shamt);
 
-        self.write_to_page(addr, x);
+        let write_cycles = self.write_to_page(addr, x).cycles();
+
+        OperationResult::new_unit(read_cycles + read_page_cycles + write_cycles)
     }
 
-    fn not1(&mut self, _opcode: u8) -> () {
-        let (addr, bit_idx) = self.addr_and_idx();
-        let data = self.read_ram(addr);
+    fn not1(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult { ret: (addr, bit_idx), cycles: fetch_cycles } = self.addr_and_idx();
+        let OperationResult { ret: data, cycles: read_cycles } = self.read_ram(addr);
         let ret = data ^ (1 << bit_idx);
         
-        self.write_ram(addr, ret);
+        let write_cycles = self.write_ram(addr, ret).cycles();
+
+        OperationResult::new_unit(fetch_cycles + read_cycles + write_cycles)
     }
 
-    fn mov1_to_mem(&mut self, _opcode: u8) -> () {
-        let (addr, bit_idx) = self.addr_and_idx();        
-        let data = self.read_ram(addr);
-        self.cycles(1);
+    fn mov1_to_mem(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: (addr, bit_idx), cycles: fetch_cycle } = self.addr_and_idx();        
+        let OperationResult{ ret: data, cycles: read_cycles } = self.read_ram(addr);
         let ret = 
             if self.reg.psw.carry() {
                 data | (1 << bit_idx)                
@@ -905,80 +1009,90 @@ impl Spc700 {
                 data & !(1 << bit_idx)
             };
         
-        self.write_ram(addr, ret);        
+        let write_cycles = self.write_ram(addr, ret).cycles(); 
+
+        OperationResult::new_unit(fetch_cycle + read_cycles + write_cycles + 1)
     }
 
-    fn mov1_to_psw(&mut self, _opcode: u8) -> () {
-        let (addr, bit_idx) = self.addr_and_idx();
-        let data = self.read_ram(addr);
+    fn mov1_to_psw(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: (addr, bit_idx), cycles: fetch_cycles } = self.addr_and_idx();
+        let OperationResult{ ret: data, cycles: read_cycles } = self.read_ram(addr);
         let carry = (data >> bit_idx) & 1;
         self.reg.psw.set_carry(carry == 1);
+
+        OperationResult::new_unit(fetch_cycles + read_cycles)
     }
 
-    fn or1(&mut self, opcode: u8) -> () {
+    fn or1(&mut self, opcode: u8) -> OperationResult<()> {
         let rev = (opcode & 0x20)  != 0;
-        let (addr, bit_idx) = self.addr_and_idx();
-        let data = self.read_ram(addr);
+        let OperationResult{ ret: (addr, bit_idx), cycles: fetch_cycles } = self.addr_and_idx();
+        let OperationResult{ ret: data, cycles: read_cycles } = self.read_ram(addr);
         let bit = ((data >> bit_idx) & 1) == 1;        
         let ret = self.reg.psw.carry () | (rev ^ bit);
-        self.cycles(1);
 
         self.reg.psw.set_carry(ret);
+
+        OperationResult::new_unit(fetch_cycles + read_cycles + 1)
     }
 
-    fn and1(&mut self, opcode: u8) -> () {
+    fn and1(&mut self, opcode: u8) -> OperationResult<()> {
         let rev = (opcode & 0x20) != 0;
-        let (addr, bit_idx) = self.addr_and_idx();
-        let data = self.read_ram(addr);
+        let OperationResult{ ret: (addr, bit_idx), cycles: fetch_cycles } = self.addr_and_idx();
+        let OperationResult{ ret: data, cycles: read_cycles } = self.read_ram(addr);
         let bit = ((data >> bit_idx) & 1) == 1;        
         let ret = self.reg.psw.carry () & (rev ^ bit);
         
         self.reg.psw.set_carry(ret);
+
+        OperationResult::new_unit(fetch_cycles + read_cycles)
     }
 
-    fn eor1(&mut self, _opcode: u8) -> () {
-        let (addr, bit_idx) = self.addr_and_idx();
-        let data = self.read_ram(addr);
+    fn eor1(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: (addr, bit_idx), cycles: fetch_cycles } = self.addr_and_idx();
+        let OperationResult{ ret: data, cycles: read_cycles } = self.read_ram(addr);
         let bit = ((data >> bit_idx) & 1) == 1;        
         let ret = self.reg.psw.carry () ^ bit;
-        self.cycles(1);
 
         self.reg.psw.set_carry(ret);
+
+        OperationResult::new_unit(fetch_cycles + read_cycles + 1)
     }
 
-    fn clrc(&mut self, _opcode: u8) -> () {
-        self.cycles(1);
+    fn clrc(&mut self, _opcode: u8) -> OperationResult<()> {
         self.reg.psw.set_carry(false);
+        OperationResult::new_unit(1)
     }
 
-    fn setc(&mut self, _opcode: u8) -> () {
-        self.cycles(1);
+    fn setc(&mut self, _opcode: u8) -> OperationResult<()> {
         self.reg.psw.set_carry(true);
+        OperationResult::new_unit(1)
     }
 
-    fn notc(&mut self, _opcode: u8) -> () {
-        self.cycles(2);
+    fn notc(&mut self, _opcode: u8) -> OperationResult<()> {
         self.reg.psw.set_carry(!self.reg.psw.carry());
+        OperationResult::new_unit(2)
     }
 
-    fn clrv(&mut self, _opcode: u8) -> () {
-        self.cycles(1);
+    fn clrv(&mut self, _opcode: u8) -> OperationResult<()> {
         self.reg.psw.set_overflow(false);
         self.reg.psw.set_half(false);
+        OperationResult::new_unit(1)
     }
 
-    fn addr_and_idx(&mut self) -> (u16, u8) {
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+    fn addr_and_idx(&mut self) -> OperationResult<(u16, u8)> {
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
         let idx = (addr >> 13) as u8;
         let addr = addr & 0x1FFF;
 
-        (addr, idx)
+        OperationResult::new((addr, idx), lower_cycles + upper_cycles)
     }
 
-    fn branch_by_psw(&mut self, opcode: u8) -> () {
-        let rr = self.read_from_pc();        
+    fn branch_by_psw(&mut self, opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: rr, cycles: fetch_cycles } = self.read_from_pc();        
         let flag_type = (opcode >> 6) & 0x03;
 
         // 各フラグ（要素順にsign, overflow, carry, zero）のみを抽出するためのマスク
@@ -990,214 +1104,262 @@ impl Spc700 {
 
         let branch = (flag != 0) == branch_trigger;        
         if branch { 
-            self.cycles(2);
             // 一旦 u8 -> i8のキャストを挟まないと、期待通りの結果が得られない
             // 例) 0xFF as i16 => 255(0xFF), (0xFF as i8) as i16 => -1
             let offset = (rr as i8) as i16;
             let next_pc = (self.reg.pc as i16).wrapping_add(offset);
             self.reg.pc = next_pc as u16;
+
+            OperationResult::new_unit(fetch_cycles + 2)
+         } else {
+            OperationResult::new_unit(fetch_cycles)
          }
+
     }
 
-    fn branch_by_mem_bit(&mut self, opcode: u8) -> () {
-        let addr = self.read_from_pc();
-        let data = self.read_from_page(addr);        
-        let offset = self.read_from_pc() as u16;
+    fn branch_by_mem_bit(&mut self, opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: addr, cycles: addr_cycles } = self.read_from_pc();
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_from_page(addr);        
+        let OperationResult{ ret: offset, cycles: offset_cycles } = self.read_from_pc();
+        let offset = offset as u16;
         let offset = if (offset & 0x80) != 0 { 0xFF00 | offset } else { offset };
 
         let require_true = (opcode & 0x10) == 0;
         let bit_idx = (opcode >> 5) & 0x7;
-        self.cycles(1);
 
         let bit = ((data >> bit_idx) & 1) == 1;
         let is_branch = bit == require_true;
 
         if is_branch {
-            self.cycles(2);
             self.reg.pc = self.reg.pc.wrapping_add(offset);
+            OperationResult::new_unit(addr_cycles + data_cycles + offset_cycles + 3)
+        } else {
+            OperationResult::new_unit(addr_cycles + data_cycles + offset_cycles + 1)
         }
     }
 
-    fn cbne(&mut self, opcode: u8) -> () {
-        let aa = self.read_from_pc();
+    fn cbne(&mut self, opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: aa, cycles: aa_cycles } = self.read_from_pc();
         let require_x = match opcode {
             0x2E => false,
             0xDE => true,
             _ => panic!("expected opcodes are 0x2E and 0xDE. actual: {:#04x}", opcode),
         };
-        let addr = 
-            if require_x { self.cycles(1); aa.wrapping_add(self.reg.x) }
-            else { aa };
-        let data = self.read_from_page(addr);
-        let rr = self.read_from_pc() as u16;
-        self.cycles(1);
+        let OperationResult{ ret: addr, cycles: addr_cycles } = 
+            if require_x { 
+                let aa = aa.wrapping_add(self.reg.x);
+                OperationResult::new(aa, 1)
+            } else { 
+                OperationResult::new(aa, 0)
+            };
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_from_page(addr);
+        let OperationResult{ ret: rr, cycles: rr_cycles } = self.read_from_pc();
+        let rr = rr as u16;
 
         if self.reg.a != data {
             let offset = if (rr & 0x80) != 0 { 0xFF00 | rr } else { rr };
             self.reg.pc = self.reg.pc.wrapping_add(offset);
-            self.cycles(2);
+            OperationResult::new_unit(aa_cycles + addr_cycles + data_cycles + rr_cycles + 3)
+        } else {
+            OperationResult::new_unit(aa_cycles + addr_cycles + data_cycles + rr_cycles + 1)
         }
     }
 
-    fn dbnz_y(&mut self, _opcode: u8) -> () {
-        let rr = self.read_from_pc() as u16;
+    fn dbnz_y(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: rr, cycles: rr_cycles } = self.read_from_pc();
+        let rr = rr as u16;
         self.reg.y = self.reg.y.wrapping_sub(1);
-        self.cycles(2);
         
         if self.reg.y != 0 {
-            self.cycles(2);
             let offset = if (rr & 0x80) != 0 { 0xFF00 | rr } else { rr };
             self.reg.pc = self.reg.pc.wrapping_add(offset);
+            OperationResult::new_unit(rr_cycles + 4)
+        } else {
+            OperationResult::new_unit(rr_cycles + 2)
         }
     }
 
-    fn dbnz_data(&mut self, _opcode: u8) -> () {
-        let addr = self.read_from_pc();
-        let rr = self.read_from_pc() as u16;
-        let data = self.read_from_page(addr).wrapping_sub(1);        
-        self.write_to_page(addr, data);        
-        self.cycles(1);
+    fn dbnz_data(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: addr, cycles: addr_cycles } = self.read_from_pc();
+        let OperationResult{ ret: rr, cycles: rr_cycles } = self.read_from_pc();
+        let rr = rr as u16;
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_from_page(addr);
+        let data = data.wrapping_sub(1);        
+        let write_cycles = self.write_to_page(addr, data).cycles();        
 
         if data != 0 {
-            self.cycles(2);
             let offset = if (rr & 0x80) != 0 { 0xFF00 | rr } else { rr };
             self.reg.pc = self.reg.pc.wrapping_add(offset);
+            OperationResult::new_unit(addr_cycles + rr_cycles + data_cycles + write_cycles + 3)
+        } else {
+            OperationResult::new_unit(addr_cycles + rr_cycles + data_cycles + write_cycles + 1)
         }
     }
 
-    fn bra(&mut self, _opcode: u8) -> () {
-        let rr = self.read_from_pc() as u16;
-        self.cycles(2);
+    fn bra(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: rr, cycles: rr_cycles } = self.read_from_pc();
+        let rr = rr as u16;
         let offset = if (rr & 0x80) != 0 { 0xFF00 | rr } else { rr };
         self.reg.pc = self.reg.pc.wrapping_add(offset);
+
+        OperationResult::new_unit(rr_cycles + 2)
     }
 
-    fn jmp_abs(&mut self, _opcode: u8) -> () {
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+    fn jmp_abs(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
 
         self.reg.pc = addr;
+
+        OperationResult::new_unit(lower_cycles + upper_cycles)
     }
 
-    fn jmp_abs_x(&mut self, _opcode: u8) -> () {
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+    fn jmp_abs_x(&mut self, _opcode: u8) -> OperationResult<()> { 
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
         let addr = addr.wrapping_add(self.reg.x as u16);
-        self.cycles(1);
 
-        let dst_lower = self.read_ram(addr) as u16;
-        let dst_upper = self.read_ram(addr.wrapping_add(1)) as u16;
+        let OperationResult{ ret: dst_lower, cycles: dst_lower_cycles } = self.read_ram(addr);
+        let OperationResult{ ret: dst_upper, cycles: dst_upper_cycles } = self.read_ram(addr.wrapping_add(1));
+        let dst_lower = dst_lower as u16;
+        let dst_upper = dst_upper as u16; 
 
         self.reg.pc = (dst_upper << 8) | dst_lower;
+
+        OperationResult::new_unit(lower_cycles + upper_cycles + dst_lower_cycles + dst_upper_cycles + 1)
     }
     
-    fn call(&mut self, _opcode: u8) -> () {
-        let dst_lower = self.read_from_pc() as u16;
-        let dst_upper = self.read_from_pc() as u16;
+    fn call(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: dst_lower, cycles: dst_lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: dst_upper, cycles: dst_upper_cycles } = self.read_from_pc();
+        let dst_lower = dst_lower as u16;
+        let dst_upper = dst_upper as u16;
         let dst = (dst_upper << 8) | dst_lower;
 
-        self.cycles(1);
-        self.write_to_stack((self.reg.pc >> 8) as u8);
+        let upper_write_cycles = self.write_to_stack((self.reg.pc >> 8) as u8).cycles();
         self.reg.sp = self.reg.sp.wrapping_sub(1);
-        self.cycles(1);
-        self.write_to_stack(self.reg.pc as u8);
+        let lower_write_cycles = self.write_to_stack(self.reg.pc as u8).cycles();
         self.reg.sp = self.reg.sp.wrapping_sub(1);
-        self.cycles(1);
+
+        let dst_cycles = dst_upper_cycles + dst_lower_cycles;
+        let write_cycles = upper_write_cycles + lower_write_cycles;
     
         self.reg.pc = dst;
+
+        OperationResult::new_unit(dst_cycles + write_cycles + 3)
     }
 
-    fn tcall(&mut self, opcode: u8) -> () {
+    fn tcall(&mut self, opcode: u8) -> OperationResult<()> {
         let pc_lower = self.reg.pc as u8;
         let pc_upper = (self.reg.pc >> 8) as u8;
-        self.write_to_stack(pc_upper);
+        let upper_write_cycles = self.write_to_stack(pc_upper).cycles();
         self.reg.sp = self.reg.sp.wrapping_sub(1);
-        self.cycles(1);
 
-        self.write_to_stack(pc_lower);
+        let lower_write_cycles = self.write_to_stack(pc_lower).cycles();
         self.reg.sp = self.reg.sp.wrapping_sub(1);
-        self.cycles(1);
 
         let offset = ((opcode >> 4) << 1) as u16;        
         let addr = 0xFFDE - offset;        
-        self.cycles(1);
 
-        let next_pc_lower = self.read_ram(addr) as u16;
-        let next_pc_upper = self.read_ram(addr.wrapping_add(1)) as u16;
+        let OperationResult{ ret: next_pc_lower, cycles: lower_cycles } = self.read_ram(addr);
+        let OperationResult{ ret: next_pc_upper, cycles: upper_cycles } = self.read_ram(addr.wrapping_add(1));
+        let next_pc_lower = next_pc_lower as u16;
+        let next_pc_upper = next_pc_upper as u16;
         let next_pc = (next_pc_upper << 8) | next_pc_lower;
 
+        let write_cycles = upper_write_cycles + lower_write_cycles;
+        let read_cycles = lower_cycles + upper_cycles;
+
         self.reg.pc = next_pc;
+
+        OperationResult::new_unit(write_cycles + read_cycles + 3)
     }
 
-    fn pcall(&mut self, _opcode: u8) -> () {        
-        let lower = self.read_from_pc() as u16;
-        let next_pc = 0xFF00 | lower;
+    fn pcall(&mut self, _opcode: u8) -> OperationResult<()> {        
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let next_pc = 0xFF00 | lower as u16;
 
         let pc_lower = self.reg.pc as u8;
         let pc_upper = (self.reg.pc >> 8) as u8;
-        self.write_to_stack(pc_upper);
+        let write_upper_cycles = self.write_to_stack(pc_upper).cycles();
         self.reg.sp = self.reg.sp.wrapping_sub(1);
-        self.cycles(1);
 
-        self.write_to_stack(pc_lower);
+        let write_lower_cycles = self.write_to_stack(pc_lower).cycles();
         self.reg.sp = self.reg.sp.wrapping_sub(1);
-        self.cycles(1);
 
+        let write_cycles = write_upper_cycles + write_lower_cycles;
         self.reg.pc = next_pc;
+
+        OperationResult::new_unit(lower_cycles + write_cycles + 2)
     }
 
-    fn ret(&mut self, _opcode: u8) -> () {
-        let partial_pcs: Vec<u8> = (0..2).map(|_| {
+    fn ret(&mut self, _opcode: u8) -> OperationResult<()> {
+        let partial_pcs: Vec<OperationResult<u8>> = (0..2).map(|_| {
             self.reg.sp = self.reg.sp.wrapping_add(1);
-            self.cycles(1);
-            let partial_pc = self.read_from_stack();            
+            let OperationResult{ ret: partial_pc, cycles: pc_cycles } = self.read_from_stack();            
 
-            partial_pc
+            OperationResult::new(partial_pc, pc_cycles + 1)
         }).collect();
         
-        let lower = partial_pcs[0] as u16;
-        let upper = partial_pcs[1] as u16;
+        let OperationResult{ ret: lower, cycles: lower_cycles } = partial_pcs[0];
+        let OperationResult{ ret: upper, cycles: upper_cycles } = partial_pcs[1];
+        let lower = lower as u16;
+        let upper = upper as u16;
         let next_pc = (upper << 8) | lower;
 
         self.reg.pc = next_pc;
+
+        OperationResult::new_unit(lower_cycles + upper_cycles)
     }
 
-    fn ret1(&mut self, _opcode: u8) -> () {
-        let psw = self.read_from_stack();
+    fn ret1(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: psw, cycles: psw_cycles } = self.read_from_stack();
         self.reg.sp = self.reg.sp.wrapping_add(1);
         self.reg.psw.set(psw);
         
-        let lower_pc = self.read_from_stack() as u16;
+        let OperationResult{ ret: lower_pc, cycles: lower_cycles } = self.read_from_stack();
         self.reg.sp = self.reg.sp.wrapping_add(1);
-        self.cycles(1);
 
-        let upper_pc = self.read_from_stack() as u16;
+        let OperationResult{ ret: upper_pc, cycles: upper_cycles } = self.read_from_stack();
         self.reg.sp = self.reg.sp.wrapping_add(1);
-        self.cycles(1);
 
-        self.reg.pc = (upper_pc << 8) | (lower_pc)
+        let lower_pc = lower_pc as u16;
+        let upper_pc = upper_pc as u16;
+
+        self.reg.pc = (upper_pc << 8) | (lower_pc);
+
+        OperationResult::new_unit(psw_cycles + lower_cycles + upper_cycles + 2)
     }
 
-    fn brk(&mut self, _opcode: u8) -> () {
-        let lower = self.read_ram(0xFFDE) as u16;
-        let upper = self.read_ram(0xFFDF) as u16;
+    fn brk(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_ram(0xFFDE);
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_ram(0xFFDF);
+        let lower = lower as u16;
+        let upper = upper as u16;
         let next_pc = (upper << 8) | lower;
 
         let pc_lower = self.reg.pc as u8;
         let pc_upper = (self.reg.pc >> 8) as u8;
-        self.write_to_stack(pc_upper);
+        let write_upper_cycles = self.write_to_stack(pc_upper).cycles();
         self.reg.sp = self.reg.sp.wrapping_sub(1);
-        self.cycles(1);
-        self.write_to_stack(pc_lower);
+        let write_lower_cycles = self.write_to_stack(pc_lower).cycles();
         self.reg.sp = self.reg.sp.wrapping_sub(1);
-        self.cycles(1);
 
-        self.write_to_stack(self.reg.psw.get());
+        let write_psw_cycles = self.write_to_stack(self.reg.psw.get()).cycles();
         self.reg.sp = self.reg.sp.wrapping_sub(1);
         
         self.reg.pc = next_pc;
+
+        let read_cycles = lower_cycles + upper_cycles;
+        let write_cycles = write_upper_cycles + write_lower_cycles + write_psw_cycles;
+
+        OperationResult::new_unit(read_cycles + write_cycles + 2)
     }    
 
     fn fetch_alu_op(opcode: u8) -> fn(&mut Register, u8, u8) -> u8 {
@@ -1224,7 +1386,7 @@ impl Spc700 {
         }
     }
 
-    fn alu_dp(&mut self, opcode: u8) -> () {
+    fn alu_dp(&mut self, opcode: u8) -> OperationResult<()> {
         let op = match opcode {
             0x3E => cmp,
             0x7E => cmp,
@@ -1239,8 +1401,8 @@ impl Spc700 {
             _ => panic!("unexpected opcode: {}", opcode),
         };
 
-        let addr = self.read_from_pc();        
-        let b = self.read_from_page(addr);
+        let OperationResult{ ret: addr, cycles: addr_cycles } = self.read_from_pc();        
+        let OperationResult{ ret: b, cycles: b_cycles } = self.read_from_page(addr);
         let a = match reg_type {
             0 => self.reg.a,
             1 => self.reg.x,
@@ -1249,9 +1411,11 @@ impl Spc700 {
         };         
 
         self.reg.a = op(&mut self.reg, a, b);        
+
+        OperationResult::new_unit(addr_cycles + b_cycles)
     }
 
-    fn alu_addr(&mut self, opcode: u8) -> () {        
+    fn alu_addr(&mut self, opcode: u8) -> OperationResult<()> {        
         let op = match opcode {
             0x1E => cmp,
             0x5E => cmp, 
@@ -1266,11 +1430,13 @@ impl Spc700 {
             _ => panic!("unexpected opcode: {}", opcode),
         };
         
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
 
-        let b = self.read_ram(addr);
+        let OperationResult{ ret: b, cycles: b_cycles } = self.read_ram(addr);
         let a = match reg_type {
             0 => self.reg.a,
             1 => self.reg.x,
@@ -1279,112 +1445,135 @@ impl Spc700 {
         };        
         
         self.reg.a = op(&mut self.reg, a, b);        
+
+        OperationResult::new_unit(lower_cycles + upper_cycles + b_cycles)
     }
 
-    fn alu_indirect_x(&mut self, opcode: u8) -> () {
+    fn alu_indirect_x(&mut self, opcode: u8) -> OperationResult<()> {
         let op = Spc700::fetch_alu_op(opcode);
         let x = self.reg.x;
-        self.cycles(1);
 
         let a = self.reg.a;
-        let b = self.read_from_page(x);
+        let OperationResult{ ret: b, cycles: b_cycles } = self.read_from_page(x);
         let data = op(&mut self.reg, a, b);
 
-        self.reg.a = data;        
+        self.reg.a = data;       
+        
+        OperationResult::new_unit(b_cycles + 1)
     }
 
-    fn alu_x_idx_indirect(&mut self, opcode: u8) -> () {
+    fn alu_x_idx_indirect(&mut self, opcode: u8) -> OperationResult<()> {
         let op = Spc700::fetch_alu_op(opcode);
-        let addr = self.read_from_pc().wrapping_add(self.reg.x);
-        self.cycles(1);
+        let OperationResult{ ret: addr, cycles: addr_cycles } = self.read_from_pc();
+        let addr = addr.wrapping_add(self.reg.x);
         
         let a = self.reg.a;
-        let b = self.read_from_page(addr);        
+        let OperationResult{ ret: b, cycles: b_cycles } = self.read_from_page(addr);        
         let ret = op(&mut self.reg, a, b);
 
-        self.reg.a = ret;        
+        self.reg.a = ret;       
+        
+        OperationResult::new_unit(addr_cycles + b_cycles + 1)
     }
 
-    fn alu_x_idx_addr(&mut self, opcode: u8) -> () {
+    fn alu_x_idx_addr(&mut self, opcode: u8) -> OperationResult<()> {
         let op = Spc700::fetch_alu_op(opcode);
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
         let addr = addr.wrapping_add(self.reg.x as u16);
-        self.cycles(1);
-        let data = self.read_ram(addr);
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_ram(addr);
 
         let a = self.reg.a;
         let ret = op(&mut self.reg, a, data);
 
         self.reg.a = ret;
+
+        OperationResult::new_unit(lower_cycles + upper_cycles + data_cycles + 1)
     }
 
-    fn alu_x_ind_ind(&mut self, opcode: u8) -> () {
+    fn alu_x_ind_ind(&mut self, opcode: u8) -> OperationResult<()> {
         let op = Spc700::fetch_alu_op(opcode);
-        let base_addr = self.read_from_pc().wrapping_add(self.reg.x);        
-        self.cycles(1);
-        let lower = self.read_from_page(base_addr) as u16;
-        let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;
+        let OperationResult{ ret: base_addr, cycles: base_addr_cycles } = self.read_from_pc();
+        let base_addr = base_addr.wrapping_add(self.reg.x);        
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_page(base_addr);
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_page(base_addr.wrapping_add(1));
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
-        let data = self.read_ram(addr);
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_ram(addr);
 
         let a = self.reg.a;
         let ret = op(&mut self.reg, a, data);
         
         self.reg.a = ret;
+
+        let addr_cycles = lower_cycles + upper_cycles;
+        OperationResult::new_unit(addr_cycles + base_addr_cycles + data_cycles + 1)
     }
 
-    fn alu_y_ind_ind(&mut self, opcode: u8) -> () {
+    fn alu_y_ind_ind(&mut self, opcode: u8) -> OperationResult<()> {
         let op = Spc700::fetch_alu_op(opcode);
-        let base_addr = self.read_from_pc();
-        let lower = self.read_from_page(base_addr) as u16;
-        let upper = self.read_from_page(base_addr.wrapping_add(1)) as u16;        
-        let addr = (upper << 8) | lower;
-        let addr = addr.wrapping_add(self.reg.y as u16);
-        self.cycles(1);
-        let data = self.read_ram(addr);
-        let a = self.reg.a;
-        
-        let ret = op(&mut self.reg, a, data);
-        
-        self.reg.a = ret;
-    }
-
-    fn alu_y_idx_addr(&mut self, opcode: u8) -> () {
-        let op = Spc700::fetch_alu_op(opcode);
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+        let OperationResult{ ret: base_addr, cycles: base_addr_cycles } = self.read_from_pc();
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_page(base_addr);
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_page(base_addr.wrapping_add(1));
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
         let addr = addr.wrapping_add(self.reg.y as u16);
-        self.cycles(1);
-        let data = self.read_ram(addr);
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_ram(addr);
+        let a = self.reg.a;
+        
+        let ret = op(&mut self.reg, a, data);
+        
+        self.reg.a = ret;
+
+        let addr_cycles = lower_cycles + upper_cycles;
+        OperationResult::new_unit(base_addr_cycles + addr_cycles + data_cycles + 1)
+    }
+
+    fn alu_y_idx_addr(&mut self, opcode: u8) -> OperationResult<()> {
+        let op = Spc700::fetch_alu_op(opcode);
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
+        let addr = (upper << 8) | lower;
+        let addr = addr.wrapping_add(self.reg.y as u16);
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_ram(addr);
         let a = self.reg.a;
 
         let ret = op(&mut self.reg, a, data);
 
         self.reg.a = ret;
+
+        let addr_cycles = lower_cycles + upper_cycles;
+
+        OperationResult::new_unit(addr_cycles + data_cycles + 1)
     }
 
-    fn alu_x_y(&mut self, opcode: u8) -> () {
+    fn alu_x_y(&mut self, opcode: u8) -> OperationResult<()> {
         let op = Spc700::fetch_alu_op(opcode);
         let op_upper = (opcode >> 4) & 0x0F;
         let is_cmp_op = op_upper == 0x6 || op_upper == 0x7;
 
-        self.cycles(1);
-        let x_data = self.read_from_page(self.reg.x);        
-        let y_data = self.read_from_page(self.reg.y);
+        let OperationResult{ ret: x_data, cycles: x_cycles } = self.read_from_page(self.reg.x);        
+        let OperationResult{ ret: y_data, cycles: y_cycles } = self.read_from_page(self.reg.y);
         let ret = op(&mut self.reg, x_data, y_data);        
 
-        if !is_cmp_op {
-            self.write_to_page(self.reg.x, ret);
+        let additional_cycles = if !is_cmp_op {
+            self.write_to_page(self.reg.x, ret).cycles()
         } else {
-            self.cycles(1)
-        }
+            1
+        };
+
+        OperationResult::new_unit(x_cycles + y_cycles + additional_cycles + 1)
     }
 
     // TODO 取得及び書き込むレジスタの種類を数字ではなくenum値で表現するように変更する
-    fn alu_imm(&mut self, opcode: u8) -> () {
+    fn alu_imm(&mut self, opcode: u8) -> OperationResult<()> {
         let op = match opcode {
             0xC8 => cmp,
             0xAD => cmp,
@@ -1406,7 +1595,7 @@ impl Spc700 {
             _ => panic!("from register types must be between 0 to 2"),
         };
 
-        let b = self.read_from_pc();
+        let OperationResult{ ret: b, cycles: b_cycles } = self.read_from_pc();
         let ret = op(&mut self.reg, a, b);
         match reg_type {
             0 => self.reg.a = ret,
@@ -1414,86 +1603,106 @@ impl Spc700 {
             2 => self.reg.y = ret,
             _ => panic!("from register types must be between 0 to 2"),
         };
+
+        OperationResult::new_unit(b_cycles)
     }
 
-    fn alu_dp_imm(&mut self, opcode: u8) -> () {
+    fn alu_dp_imm(&mut self, opcode: u8) -> OperationResult<()> {
         let op = Spc700::fetch_alu_op(opcode);
         let op_upper = (opcode >> 4) & 0x0F;
         let is_cmp_op = op_upper == 0x6 || op_upper == 0x7; 
 
-        let imm = self.read_from_pc();
-        let addr = self.read_from_pc();
-        let data = self.read_from_page(addr);
+        let OperationResult{ ret: imm, cycles: imm_cycles } = self.read_from_pc();
+        let OperationResult{ ret: addr, cycles: addr_cycles } = self.read_from_pc();
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_from_page(addr);
         let ret = op(&mut self.reg, data, imm);
 
-        if !is_cmp_op {
-            self.write_to_page(addr, ret);
+        let additional_cycles = if !is_cmp_op {
+            self.write_to_page(addr, ret).cycles()
         } else {
-            self.cycles(1);
-        }
+            1
+        };
+
+        let op_cycles = imm_cycles + addr_cycles + data_cycles;
+
+        OperationResult::new_unit(op_cycles + additional_cycles)
     }
 
-    fn alu_dp_dp(&mut self, opcode: u8) -> () {
+    fn alu_dp_dp(&mut self, opcode: u8) -> OperationResult<()> {
         let op = Spc700::fetch_alu_op(opcode);
         let op_upper = (opcode >> 4) & 0x0F;
         let is_cmp_op = op_upper == 0x6 || op_upper == 0x7; 
 
-        let bb = self.read_from_pc();
-        let b = self.read_from_page(bb);
-        let aa = self.read_from_pc();        
-        let a = self.read_from_page(aa);
+        let OperationResult{ ret: bb, cycles: bb_cycles } = self.read_from_pc();
+        let OperationResult{ ret: b, cycles: b_cycles }  = self.read_from_page(bb);
+        let OperationResult{ ret: aa, cycles: aa_cycles } = self.read_from_pc();        
+        let OperationResult{ ret: a, cycles: a_cycles } = self.read_from_page(aa);
 
         let ret = op(&mut self.reg, a, b);
 
-        if !is_cmp_op {
-            self.write_to_page(aa, ret);
+        let additional_cycles = if !is_cmp_op {
+            self.write_to_page(aa, ret).cycles()
         } else {
-            self.cycles(1);
-        } 
+            1
+        }; 
+
+        let op_cycles = bb_cycles + b_cycles + aa_cycles + a_cycles;
+        OperationResult::new_unit(op_cycles + additional_cycles)
     }
 
-    fn shift_acc(&mut self, opcode: u8) -> () {
+    fn shift_acc(&mut self, opcode: u8) -> OperationResult<()> {
         let op = Spc700::fetch_shift_op(opcode);
 
-        self.cycles(1);
         let ret = self.shift(opcode, self.reg.a, op);
         
-        self.reg.a = ret;        
+        self.reg.a = ret;       
+    
+        OperationResult::new_unit(1)
     }
 
-    fn shift_dp(&mut self, opcode: u8) -> () {
+    fn shift_dp(&mut self, opcode: u8) -> OperationResult<()> {
         let op = Spc700::fetch_shift_op(opcode);
 
-        let addr = self.read_from_pc();
-        let data = self.read_from_page(addr);        
+        let OperationResult{ ret: addr, cycles: addr_cycles } = self.read_from_pc();
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_from_page(addr);        
         let ret = self.shift(opcode, data, op);
 
-        self.write_to_page(addr, ret);
+        let write_cycles = self.write_to_page(addr, ret).cycles();
+
+        OperationResult::new_unit(addr_cycles + data_cycles + write_cycles)
     }
 
-    fn shift_x_idx_indirect(&mut self, opcode: u8) -> () {
+    fn shift_x_idx_indirect(&mut self, opcode: u8) -> OperationResult<()> {
         let op = Spc700::fetch_shift_op(opcode);
 
-        let addr = self.read_from_pc().wrapping_add(self.reg.x);
-        self.cycles(1);
+        let OperationResult{ ret: addr, cycles: addr_cycles } = self.read_from_pc();
+        let addr = addr.wrapping_add(self.reg.x);
 
-        let data = self.read_from_page(addr);
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_from_page(addr);
         let ret = self.shift(opcode, data, op);
 
-        self.write_to_page(addr, ret);
+        let write_cycles = self.write_to_page(addr, ret).cycles();
+
+        OperationResult::new_unit(addr_cycles + data_cycles + write_cycles + 1)
     }
 
-    fn shift_addr(&mut self, opcode: u8) -> () {
+    fn shift_addr(&mut self, opcode: u8) -> OperationResult<()> {
         let op = Spc700::fetch_shift_op(opcode);
 
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
-        let data = self.read_ram(addr);
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_ram(addr);
 
         let ret = self.shift(opcode, data, op);
 
-        self.write_ram(addr, ret);
+        let write_cycles = self.write_ram(addr, ret).cycles();
+
+        let cycles = lower_cycles + upper_cycles + data_cycles + write_cycles;
+
+        OperationResult::new_unit(cycles)
     }
 
     fn shift(&mut self, opcode: u8, data: u8, op: impl Fn(u8, bool) -> (u8, bool)) -> u8 {
@@ -1510,8 +1719,7 @@ impl Spc700 {
         data
     }
 
-    fn inc_dec_reg(&mut self, opcode: u8) -> () {
-        self.cycles(1);
+    fn inc_dec_reg(&mut self, opcode: u8) -> OperationResult<()> {
         let is_inc = (opcode & 0x20) != 0;
         let upper = (opcode >> 4) & 0x0F;
         let lower = opcode & 0x0F;
@@ -1539,47 +1747,57 @@ impl Spc700 {
         *data = ret;
 
         self.set_inc_dec_flag(ret);
+
+        OperationResult::new_unit(1)
     }
 
-    fn inc_dec_dp(&mut self, opcode: u8) -> () {
+    fn inc_dec_dp(&mut self, opcode: u8) -> OperationResult<()> {
         let is_inc = (opcode & 0x20) != 0;
-        let addr = self.read_from_pc();
-        let data = self.read_from_page(addr);
+        let OperationResult{ ret: addr, cycles: addr_cycles } = self.read_from_pc();
+        let OperationResult{ ret: data, cycles: data_cycles }  = self.read_from_page(addr);
         let ret =
             if is_inc { data.wrapping_add(1) }
             else      { data.wrapping_sub(1) };
 
-        self.write_to_page(addr, ret);
+        let write_cycles = self.write_to_page(addr, ret).cycles();
         self.set_inc_dec_flag(ret);
+
+        OperationResult::new_unit(addr_cycles + data_cycles + write_cycles)
     }
 
-    fn inc_dec_x_idx_indirect(&mut self, opcode: u8) -> () {
+    fn inc_dec_x_idx_indirect(&mut self, opcode: u8) -> OperationResult<()> {
         let is_inc = (opcode & 0x20) != 0;
-        let addr = self.read_from_pc().wrapping_add(self.reg.x);
-        self.cycles(1);
+        let OperationResult{ ret: addr, cycles: addr_cycles } = self.read_from_pc();
+        let addr = addr.wrapping_add(self.reg.x);
 
-        let data = self.read_from_page(addr);
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_from_page(addr);
         let ret = 
             if is_inc { data.wrapping_add(1) }
             else      { data.wrapping_sub(1) };
 
-        self.write_to_page(addr, ret);
+        let write_cycles = self.write_to_page(addr, ret).cycles();
         self.set_inc_dec_flag(ret);
+
+        OperationResult::new_unit(addr_cycles + data_cycles + write_cycles + 1)
     }
 
-    fn inc_dec_addr(&mut self, opcode: u8) -> () {
+    fn inc_dec_addr(&mut self, opcode: u8) -> OperationResult<()> {
         let is_inc = (opcode & 0x20) != 0;
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
-        let data = self.read_ram(addr);
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_ram(addr);
 
         let ret =
             if is_inc { data.wrapping_add(1) }
             else      { data.wrapping_sub(1) };
 
-        self.write_ram(addr, ret);
+        let write_cycles = self.write_ram(addr, ret).cycles();
         self.set_inc_dec_flag(ret);
+
+        OperationResult::new_unit(lower_cycles + upper_cycles + data_cycles + write_cycles)
     }
     
     fn set_inc_dec_flag(&mut self, data: u8) -> () {
@@ -1590,45 +1808,47 @@ impl Spc700 {
         self.reg.psw.set_zero(is_zero);
     }
 
-    fn addw(&mut self, _opcode: u8) -> () {
+    fn addw(&mut self, _opcode: u8) -> OperationResult<()> {
         self.reg.psw.negate_carry();
 
-        let (ya, word) = self.get_word_operands();        
+        let OperationResult{ ret: (ya, word), cycles: fetch_cycles } = self.get_word_operands();        
         let ret_lower = adc(&mut self.reg, ya as u8, word as u8) as u16;
         let ret_upper = adc(&mut self.reg, (ya >> 8) as u8, (word >> 8) as u8) as u16;
         let ret = (ret_upper << 8) | ret_lower;
                 
-        self.cycles(1);
         self.reg.set_ya(ret);
-
         self.reg.psw.set_zero(ret == 0);
+
+        OperationResult::new_unit(fetch_cycles + 1)
     }
 
-    fn subw(&mut self, _opcode: u8) -> () {
+    fn subw(&mut self, _opcode: u8) -> OperationResult<()> {
         self.reg.psw.assert_carry();
 
-        let (ya, word) = self.get_word_operands();
+        let OperationResult{ ret: (ya, word), cycles: fetch_cycles } = self.get_word_operands();
         let ret_lower = sbc(&mut self.reg, ya as u8, word as u8) as u16;
         let ret_upper = sbc(&mut self.reg, (ya >> 8) as u8, (word >> 8) as u8) as u16;
         let ret = (ret_upper << 8) | ret_lower;
 
-        self.cycles(1);
         self.reg.set_ya(ret);
-
         self.reg.psw.set_zero(ret == 0);
+
+        OperationResult::new_unit(fetch_cycles + 1)
     }
 
-    fn cmpw(&mut self, _opcode: u8) -> () {
-        let (ya, word) = self.get_word_operands();
+    fn cmpw(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: (ya, word), cycles: fetch_cycles } = self.get_word_operands();
         let ret = (ya as i32) - (word as i32);
 
         self.reg.psw.set_sign((ret & 0x8000) != 0);
         self.reg.psw.set_zero(ret as u16 == 0);
         self.reg.psw.set_carry(ret >= 0);
+
+        OperationResult::new_unit(fetch_cycles)
     }
 
-    fn inc_dec_word(&mut self, opcode: u8) -> () {
-        let addr = self.read_from_pc();
+    fn inc_dec_word(&mut self, opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: addr, cycles: addr_cycles } = self.read_from_pc();
         let upper = (opcode >> 4) & 0x0F;
         let operand = match upper {
             0x1 => 0xFFFF,
@@ -1636,23 +1856,28 @@ impl Spc700 {
             _   => panic!("unexpected opcode: {}", opcode),
         };
 
-        let word_lower = self.read_from_page(addr) as u16;                
+        let OperationResult{ ret: word_lower, cycles: lower_cycles } = self.read_from_page(addr);
+        let word_lower = word_lower as u16;
         let lower_result = word_lower.wrapping_add(operand); 
         let lower_carry = lower_result >> 8;
-        self.write_to_page(addr, lower_result as u8);
+        let write_lower_cycles = self.write_to_page(addr, lower_result as u8).cycles();
 
-        let word_upper = self.read_from_page(addr.wrapping_add(1)) as u16;
-        let upper_result = word_upper.wrapping_add(lower_carry);
-        
-        self.write_to_page(addr.wrapping_add(1), upper_result as u8);
+        let OperationResult{ ret: word_upper, cycles: upper_cycles } = self.read_from_page(addr.wrapping_add(1));
+        let word_upper = word_upper as u16;
+        let upper_result = word_upper.wrapping_add(lower_carry); 
+        let write_upper_cycles = self.write_to_page(addr.wrapping_add(1), upper_result as u8).cycles();
 
         let result = (upper_result << 8) | lower_result;
         self.reg.psw.set_zero(result == 0);
         self.reg.psw.set_sign((result & 0x8000) != 0);
+
+        let write_cycles = write_lower_cycles + write_upper_cycles;
+        let cycles = addr_cycles + lower_cycles + upper_cycles + write_cycles;
+
+        OperationResult::new_unit(cycles)
     }
 
-    fn div(&mut self, _opcode: u8) -> () {
-        self.cycles(11);
+    fn div(&mut self, _opcode: u8) -> OperationResult<()> {
         let ya = self.reg.ya();
         let x = self.reg.x as u16;
 
@@ -1669,29 +1894,33 @@ impl Spc700 {
         
         self.reg.psw.set_zero(self.reg.a == 0);
         self.reg.psw.set_sign((self.reg.a & 0x80) != 0);
+
+        OperationResult::new_unit(11)
     }
 
-    fn mul(&mut self, _opcode: u8) -> () {
-        self.cycles(8);
+    fn mul(&mut self, _opcode: u8) -> OperationResult<()> {
         let ya = (self.reg.y as u16) * (self.reg.a as u16);
         self.reg.set_ya(ya);
 
         self.reg.psw.set_zero(self.reg.y == 0);
         self.reg.psw.set_sign((self.reg.y & 0x80) != 0);
+
+        OperationResult::new_unit(8)
     }
 
-    fn get_word_operands(&mut self) -> (u16, u16) {
-        let addr = self.read_from_pc();
-        let word_lower = self.read_from_page(addr) as u16;
-        let word_upper = self.read_from_page(addr.wrapping_add(1)) as u16;
+    fn get_word_operands(&mut self) -> OperationResult<(u16, u16)> {
+        let OperationResult{ ret: addr, cycles: addr_cycles } = self.read_from_pc();
+        let OperationResult{ ret: word_lower, cycles: lower_cycles }  = self.read_from_page(addr);
+        let OperationResult{ ret: word_upper, cycles: upper_cycles }  = self.read_from_page(addr.wrapping_add(1));
+        let word_lower = word_lower as u16;
+        let word_upper = word_upper as u16;
         let word = (word_upper << 8) | word_lower;
         let ya = self.reg.ya();
 
-        (ya, word)
+        OperationResult::new((ya, word), addr_cycles + lower_cycles + upper_cycles)
     }
 
-    fn daa(&mut self, _opcode: u8) -> () {
-        self.cycles(2);
+    fn daa(&mut self, _opcode: u8) -> OperationResult<()> {
         if self.reg.psw.carry() || self.reg.a > 0x99 {
             self.reg.a = self.reg.a.wrapping_add(0x60);
             self.reg.psw.assert_carry();
@@ -1702,10 +1931,11 @@ impl Spc700 {
 
         self.reg.psw.set_zero(self.reg.a == 0);
         self.reg.psw.set_sign((self.reg.a & 0x80) != 0);
+
+        OperationResult::new_unit(2)
     }
 
-    fn das(&mut self, _opcode: u8) -> () {
-        self.cycles(2);
+    fn das(&mut self, _opcode: u8) -> OperationResult<()> {
         if !self.reg.psw.carry() || self.reg.a > 0x99 {
             self.reg.a = self.reg.a.wrapping_sub(0x60);
             self.reg.psw.set_carry(false);
@@ -1716,85 +1946,98 @@ impl Spc700 {
 
         self.reg.psw.set_zero(self.reg.a == 0);
         self.reg.psw.set_sign((self.reg.a & 0x80) != 0);
+
+        OperationResult::new_unit(2)
     }
 
-    fn xcn(&mut self, _opcode: u8) -> () {
-        self.cycles(4);
+    fn xcn(&mut self, _opcode: u8) -> OperationResult<()> {
         self.reg.a = (self.reg.a >> 4) | ((self.reg.a & 0x0F) << 4);
 
         self.reg.psw.set_zero(self.reg.a == 0);
         self.reg.psw.set_sign((self.reg.a & 0x80) != 0); 
+        OperationResult::new_unit(4)
     }
 
-    fn tclr1(&mut self, _opcode: u8) -> () {
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+    fn tclr1(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
-        let data = self.read_ram(addr);
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_ram(addr);
         let ret = data & !self.reg.a;
         
-        self.read_ram(addr);
+        let read_cycles = self.read_ram(addr).cycles();
         let cmp = self.reg.a.wrapping_sub(data);
         self.reg.psw.set_zero(cmp == 0);
-        self.reg.psw.set_sign((cmp & 0x80) != 0);        
+        self.reg.psw.set_sign((cmp & 0x80) != 0);       
 
-        self.write_ram(addr, ret);
+        let write_cycles = self.write_ram(addr, ret).cycles();
 
+        let cycles = lower_cycles + upper_cycles + data_cycles + read_cycles + write_cycles;
+
+        OperationResult::new_unit(cycles)
     }
 
-    fn tset1(&mut self, _opcode: u8) -> () {
-        let lower = self.read_from_pc() as u16;
-        let upper = self.read_from_pc() as u16;
+    fn tset1(&mut self, _opcode: u8) -> OperationResult<()> {
+        let OperationResult{ ret: lower, cycles: lower_cycles } = self.read_from_pc();
+        let OperationResult{ ret: upper, cycles: upper_cycles } = self.read_from_pc();
+        let lower = lower as u16;
+        let upper = upper as u16;
         let addr = (upper << 8) | lower;
-        let data = self.read_ram(addr);
+        let OperationResult{ ret: data, cycles: data_cycles } = self.read_ram(addr);
         let ret = data | self.reg.a;
 
-        self.read_ram(addr);
+        let read_cycles = self.read_ram(addr).cycles();
         let cmp = self.reg.a.wrapping_sub(data);
         self.reg.psw.set_zero(cmp == 0);
         self.reg.psw.set_sign((cmp & 0x80) != 0);        
 
-        self.write_ram(addr, ret);
+        let write_cycles = self.write_ram(addr, ret).cycles();
+
+        let cycles = lower_cycles + upper_cycles + data_cycles + read_cycles + write_cycles;
+
+        OperationResult::new_unit(cycles)
     }
 
-    fn read_from_pc(&mut self) -> u8 {
+    fn read_from_pc(&mut self) -> OperationResult<u8> {
         let addr = self.reg.pc;
         self.reg.inc_pc(1);
     
         self.read_ram(addr)
     }
 
-    fn read_from_stack(&mut self) -> u8 {
+    fn read_from_stack(&mut self) -> OperationResult<u8> {
         let addr = (self.reg.sp as u16) | 0x0100;    
         self.read_ram(addr)
     }
 
-    fn read_from_page(&mut self, addr: u8) -> u8 {
+    fn read_from_page(&mut self, addr: u8) -> OperationResult<u8> {
         let addr = (addr as u16) | (if self.reg.psw.page() { 0x0100 } else { 0x0000 });
         self.read_ram(addr)
     }    
 
-    fn read_ram(&mut self, addr: u16) -> u8 {
-        self.cycles(1);
-        self.ram.read(addr, &mut self.dsp, &mut self.timer)
+    fn read_ram(&mut self, addr: u16) -> OperationResult<u8> {
+        let ret = self.ram.read(addr, &mut self.dsp, &mut self.timer);
+        OperationResult { cycles: 1, ret }
     }    
 
-    fn write_to_page(&mut self, addr: u8, data: u8) -> () {
+    fn write_to_page(&mut self, addr: u8, data: u8) -> OperationResult<()> {
         let addr = (addr as u16) | (if self.reg.psw.page() { 0x0100 } else { 0x0000 });
         self.write_ram(addr, data)
     }
 
-    fn write_to_stack(&mut self, data: u8) -> () {
+    fn write_to_stack(&mut self, data: u8) -> OperationResult<()> {
         let addr = (self.reg.sp as u16) | 0x0100;        
-        self.write_ram(addr, data);        
+        self.write_ram(addr, data) 
     }
 
-    pub fn write_ram(&mut self, addr: u16, data: u8) -> () {
-        self.cycles(1);
+    fn write_ram(&mut self, addr: u16, data: u8) -> OperationResult<()> {
         self.ram.write(addr, data, &mut self.dsp, &mut self.timer);
+        OperationResult::new((), 1)
     }
 
-    pub fn cycles(&mut self, cycle_count: u16) -> () {        
+    pub fn count_cycles(&mut self, cycle_count: u16) -> () {        
         self.dsp.cycles(cycle_count);
         self.timer.iter_mut().for_each(|timer| timer.cycles(cycle_count));
         self.cycle_counter += cycle_count as u64;
