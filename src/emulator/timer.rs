@@ -37,6 +37,13 @@ impl Timer {
   }
 
   pub fn cycles(&mut self, cycle: u16) -> () {
+    // 分岐処理を使わせないためにcycleを加算するか0を加算するかという形にしている。
+    // 素直な書き方では 
+    // self.enable { 
+    //   self.cycle_counter += cycle 
+    // }
+    // となる。
+    // 以下のis_reach_maxやis_divider_maxの部分も同様の理由。
     let cycle = if self.enable { cycle } else { 0 };
     self.cycle_counter += cycle;
     
