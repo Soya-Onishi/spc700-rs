@@ -153,14 +153,8 @@ fn is_require_renew(counter: u16, rate: usize) -> bool {
 }
 
 fn clip_level(current: i16, step: i16) -> i16 {
-    let new_level = (current as i32) + (step as i32);
-    
-    let level = 
-        if      new_level < 0     { 0 }
-        else if new_level > 0x7ff { 0x7ff }
-        else                      { new_level };
-
-    level as i16
+    let new_level = (current as i32) + (step as i32); 
+    new_level.min(0x7FF).max(0) as i16
 }
 
 fn get_gain_mode(flag: u8) -> GainMode {
