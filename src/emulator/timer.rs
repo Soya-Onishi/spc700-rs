@@ -37,19 +37,20 @@ impl Timer {
   }
 
   pub fn cycles(&mut self, cycle: u16) -> () {
-    if self.enable {
-      self.cycle_counter += cycle;
+    let cycle = if self.enable { cycle } else { 0 };
+    self.cycle_counter += cycle;
+    
+    let is_reach_max = self.cycle_counter >= self.max_cycle;
+    let subtraction_cycles = if is_reach_max { self.max_cycle } else { 0 };
+    let divided_count_up = if is_reach_max { 1 } else { 0 };
+    self.cycle_counter -= subtraction_cycles;
+    self.divided += divided_count_up;
 
-      if self.cycle_counter >= self.max_cycle {
-        self.cycle_counter -= self.max_cycle;
-        self.divided += 1;
-
-        if self.divided >= self.divider {
-          self.divided = 0;
-          self.out = (self.out + 1) % 16;
-        }         
-      }    
-    }    
+    let is_divider_max = self.divided >= self.divider;
+    let next_divided_value = if is_divider_max { 0 } else { self.divided };
+    let next_out_operand = if is_divider_max { 1 } else { 0 };
+    self.divided = next_divided_value;
+    self.out = (self.out + next_out_operand) % 16; 
   }
 
   pub fn enable(&mut self) -> () {
