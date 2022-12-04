@@ -686,17 +686,6 @@ impl BRRInfo {
     }
 }
 
-fn fetch_brr_nibble(nibbles: &[u8], idx: usize) -> i8 {
-    let two_nibbles = nibbles[idx >> 1] as i8;
-    let nibble_idx = idx & 1;
-    
-    if nibble_idx == 0 {
-        two_nibbles >> 4
-    } else {
-        (two_nibbles << 4) >> 4
-    }    
-}
-
 fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_info: &BRRInfo, base_idx: usize) -> () {    
     let nibbles = brrs.iter().map(|&brr| brr as i8).map(|brr| [brr >> 4, (brr << 4) >> 4]).flatten();
     let base_idx = base_idx as i32;
@@ -760,26 +749,31 @@ fn generate_additional_pitch(reg: &DSPRegister, before_out: Option<i16>) -> u16 
     }
 }
 
-fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], sample_idx: i8) -> i16 {    
-    let idx = |i: i8| -> usize {        
-        let idx = (sample_idx + i).rem_euclid(SAMPLE_BUFFER_SIZE as i8);
-        idx as usize
-    };  
+fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], sample_idx: i8) -> i16 {       
+    let table_idxs = [
+        0x0FF - base_idx,
+        0x1FF - base_idx,
+        0x100 + base_idx,
+        0x000 + base_idx,
+    ];
 
-    let factor0 = (gaussian_table::GAUSSIAN_TABLE[0x0FF - base_idx] as i32 * buffer[idx(-3)] as i32) >> 10;
-    let factor1 = (gaussian_table::GAUSSIAN_TABLE[0x1FF - base_idx] as i32 * buffer[idx(-2)] as i32) >> 10;
-    let factor2 = (gaussian_table::GAUSSIAN_TABLE[0x100 + base_idx] as i32 * buffer[idx(-1)] as i32) >> 10;
-    let factor3 = (gaussian_table::GAUSSIAN_TABLE[0x000 + base_idx] as i32 * buffer[idx( 0)] as i32) >> 10;
+    let buffer_idx_from = (sample_idx - 3).rem_euclid(SAMPLE_BUFFER_SIZE as i8) as usize;
+    let buffer_idxs = [
+        (buffer_idx_from + 0) % SAMPLE_BUFFER_SIZE,
+        (buffer_idx_from + 1) % SAMPLE_BUFFER_SIZE,
+        (buffer_idx_from + 2) % SAMPLE_BUFFER_SIZE,
+        (buffer_idx_from + 3) % SAMPLE_BUFFER_SIZE,
+    ];
 
-    let out = factor0;
-    let out = out + factor1;
-    let out = out + factor2;    
-    let out = out + factor3;    
-    let out = out.min(0x7FFF).max(-0x8000);
-     
+    let out = table_idxs.into_iter().zip(buffer_idxs.into_iter())
+        .map(|(table_idx, buffer_idx)| { 
+            (gaussian_table::GAUSSIAN_TABLE[table_idx] as i32 * buffer[buffer_idx] as i32) >> 10
+        })
+        .sum::<i32>()
+        .min(0x7FFF)
+        .max(-0x8000);
+    
     (out as i16) & !1
-    // out as i16
-    // buffer[idx(0)]
 }
 
 // TODO: need echo accumulate implementation
