@@ -698,8 +698,7 @@ fn fetch_brr_nibble(nibbles: &[u8], idx: usize) -> i8 {
 }
 
 fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_info: &BRRInfo, base_idx: usize) -> () {    
-    // let nibbles = brrs.iter().map(|brr| [brr >> 4, (brr << 4) >> 4]).flatten();
-    let nibbles = (0..16).map(|idx| fetch_brr_nibble(brrs, idx));    
+    let nibbles = brrs.iter().map(|&brr| brr as i8).map(|brr| [brr >> 4, (brr << 4) >> 4]).flatten();
     let base_idx = base_idx as i32;
 
     nibbles.enumerate().for_each(|(idx, nibble)| {
