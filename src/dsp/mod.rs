@@ -340,7 +340,7 @@ impl DSP {
 
                 blk.base_idx = (blk.base_idx + 16) % SAMPLE_BUFFER_SIZE;
                 blk.brr_info = BRRInfo::new(brr_block[0]);                
-                generate_new_sample(&Vec::from(&brr_block[1..]), &mut blk.buffer, &blk.brr_info, blk.base_idx);
+                generate_new_sample(&brr_block[1..], &mut blk.buffer, &blk.brr_info, blk.base_idx);
             }
                                                 
             blk.flush(before_out, soft_reset, cycle_counter);
