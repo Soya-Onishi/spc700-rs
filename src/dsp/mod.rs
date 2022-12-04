@@ -765,9 +765,9 @@ fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], s
         (buffer_idx_from + 3) % SAMPLE_BUFFER_SIZE,
     ];
 
-    let out = table_idxs.into_iter().zip(buffer_idxs.into_iter())
+    let out = table_idxs.iter().zip(buffer_idxs.iter())
         .map(|(table_idx, buffer_idx)| { 
-            (gaussian_table::GAUSSIAN_TABLE[table_idx] as i32 * buffer[buffer_idx] as i32) >> 10
+            (gaussian_table::GAUSSIAN_TABLE[*table_idx] as i32 * buffer[*buffer_idx] as i32) >> 10
         })
         .sum::<i32>()
         .min(0x7FFF)
