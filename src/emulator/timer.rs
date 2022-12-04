@@ -5,7 +5,7 @@ pub struct Timer {
   max_cycle: u16,
   pub divided: u16,
   // next_divider: u8,
-  pub divider: u8,
+  pub divider: u16,
   pub out: u8,
 }
 
@@ -30,8 +30,8 @@ impl Timer {
 
   pub fn new_with_init(hz: u32, divider: u8, out: u8) -> Timer {
     let mut timer = Timer::new(hz);
-    timer.divider = divider;
-    timer.out = out;
+    timer.divider = if divider == 0 { 256 } else { divider as u16 };
+    timer.out = out % 16;
 
     timer
   }
@@ -44,12 +44,9 @@ impl Timer {
         self.cycle_counter -= self.max_cycle;
         self.divided += 1;
 
-        let divider = if self.divider == 0 { 256 } else { self.divider as u16 };
-
-        if self.divided >= divider {
-          self.divided = 0;
-          self.out = (self.out + 1) & 0xF;
-        }
+        let devided = self.divided >= self.divider; 
+        self.divided = self.divided % self.divider;
+        self.out = (self.out + devided as u8) % 16;  
       }    
     }    
   }
@@ -73,6 +70,6 @@ impl Timer {
   }
 
   pub fn write_divider(&mut self, data: u8) -> () {    
-    self.divider = data;    
+    self.divider = if data == 0 { 256 } else { data as u16 };    
   }
 }
