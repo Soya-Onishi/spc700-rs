@@ -122,21 +122,69 @@ impl Ram {
         }
     }
 
-    fn read_from_io(&mut self, addr: usize, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {        
-        match addr {
-            0x00F0 => 0, // self.ram[addr], // test is write only
-            0x00F1 => 0, // self.ram[addr], // control is write only
-            0x00F2 => self.dsp_addr,
-            0x00F3 => dsp.read_from_register(self.dsp_addr as usize, self),
-            0x00F4..=0x00F7 => 0,     // return 0 (write to CPUIO for S-CPU(nor main CPU), but this is not functional for this emulator)
-            0x00F8 => self.ram[addr],
-            0x00F9 => self.ram[addr],
-            0x00FA..=0x00FC => self.ram[addr], // each timer dividers are write only            
-            0x00FD => timer[0].read_out(),
-            0x00FE => timer[1].read_out(),
-            0x00FF => timer[2].read_out(),
-            _ => panic!("{:#06x} should not be io address", addr),
+    fn read_from_io(&mut self, addr: usize, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {     
+        fn zero(_ram: &mut Ram, _addr: usize, _dsp: &mut DSP, _timer: &mut [Timer; 3]) -> u8 {
+            0
         }
+
+        fn dsp_addr(ram: &mut Ram, _addr: usize, _dsp: &mut DSP, _timer: &mut [Timer; 3]) -> u8 {
+            ram.dsp_addr
+        }
+
+        fn read_from_dsp(ram: &mut Ram, _addr: usize, dsp: &mut DSP, _timer: &mut [Timer; 3]) -> u8 {
+            dsp.read_from_register(ram.dsp_addr as usize, ram)
+        }
+
+        
+        fn read_from_ram(ram: &mut Ram, addr: usize, _dsp: &mut DSP, _timer: &mut [Timer; 3]) -> u8 {
+            ram.ram[addr]
+        }
+
+        fn read_from_timer(_ram: &mut Ram, addr: usize, _dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {
+            let idx = (addr & 0xF) - 0xD;
+            timer[idx].read_out()
+        } 
+
+        let idx = addr & 0x0F;
+        let table = [
+            // idx = 0
+            zero,
+            zero,
+            dsp_addr,
+            read_from_dsp,
+            // idx = 4
+            zero,
+            zero,
+            zero,
+            zero,
+            // idx = 8
+            read_from_ram,
+            read_from_ram,
+            read_from_ram,
+            read_from_ram,
+            // idx = C
+            read_from_ram,
+            read_from_timer,
+            read_from_timer,
+            read_from_timer,
+        ];
+
+        table[idx](self, addr, dsp, timer)
+
+        // match idx {
+            // 0x0 => 0, // self.ram[addr], // test is write only
+            // 0x1 => 0, // self.ram[addr], // control is write only
+            // 0x2 => self.dsp_addr,
+            // 0x3 => dsp.read_from_register(self.dsp_addr as usize, self),
+            // 0x4..=0x7 => 0,     // return 0 (write to CPUIO for S-CPU(nor main CPU), but this is not functional for this emulator)
+            // 0x8 => self.ram[addr],
+            // 0x9 => self.ram[addr],
+            // 0xA..=0xC => self.ram[addr], // each timer dividers are write only            
+            // 0xD => timer[0].read_out(),
+            // 0xE => timer[1].read_out(),
+            // 0xF => timer[2].read_out(),
+            // _ => panic!("{:#06x} should not be io address", addr),
+        // }
     }
 
     pub fn write(&mut self, addr: u16, data: u8, dsp: &mut DSP, timer: &mut [Timer; 3]) -> () {

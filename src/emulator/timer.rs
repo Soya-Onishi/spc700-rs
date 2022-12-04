@@ -44,9 +44,10 @@ impl Timer {
         self.cycle_counter -= self.max_cycle;
         self.divided += 1;
 
-        let devided = self.divided >= self.divider; 
-        self.divided = self.divided % self.divider;
-        self.out = (self.out + devided as u8) % 16;  
+        if self.divided >= self.divider {
+          self.divided = 0;
+          self.out = (self.out + 1) % 16;
+        }         
       }    
     }    
   }
