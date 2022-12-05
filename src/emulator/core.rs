@@ -10,6 +10,7 @@ use std::path::Path;
 use spc::spc::Spc;
 
 use typenum::marker_traits::Unsigned;
+use typenum::tyuint;
 
 pub struct Spc700 {
     pub reg: Register,
@@ -330,7 +331,7 @@ const DECODE_TABLE: [fn(&mut Spc700, u8) -> OperationResult<()>; 256] = [
     Spc700::tcall,
     Spc700::set1,
     Spc700::branch_by_mem_bit,
-    Spc700::mov_load_dp::<typenum::U228>, // 0xE4 = 228
+    Spc700::mov_load_dp::<tyuint!(0xE4)>, // 0xE4 = 228
     Spc700::mov_load_addr,
     Spc700::mov_load_x_indirect,
     Spc700::mov_load_x_ind_ind,
@@ -339,7 +340,7 @@ const DECODE_TABLE: [fn(&mut Spc700, u8) -> OperationResult<()>; 256] = [
     Spc700::mov_reg_imm,
     Spc700::mov_load_addr,
     Spc700::not1,
-    Spc700::mov_load_dp::<typenum::U235>, // 0xEB = 235
+    Spc700::mov_load_dp::<tyuint!(0xEB)>, // 0xEB = 235
     Spc700::mov_load_addr,
     Spc700::notc,
     Spc700::pop,
@@ -356,7 +357,7 @@ const DECODE_TABLE: [fn(&mut Spc700, u8) -> OperationResult<()>; 256] = [
     Spc700::mov_load_y_ind_ind,
     // upper opcode: 0xF
     // lower opcode: 0x8
-    Spc700::mov_load_dp::<typenum::U248>, // 0xF8 = 248
+    Spc700::mov_load_dp::<tyuint!(0xF8)>, // 0xF8 = 248
     Spc700::mov_load_y_idx_indirect,
     Spc700::mov_store_dp_dp,
     Spc700::mov_load_x_idx_indirect,
