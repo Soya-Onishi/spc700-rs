@@ -444,7 +444,7 @@ impl Spc700 {
         log::debug!("op: {:04x}, {}", opcode, &self.reg);
 
         self.count_cycles(cycles as u16);
-        self.dsp.flush(&mut self.ram);  // flush in force                                        
+        self.dsp.flush(&mut self.ram);
     }
 
     fn mov_reg_imm(&mut self, opcode: u8) -> OperationResult<()> {
