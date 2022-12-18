@@ -5,6 +5,8 @@ use std::u8;
 use std::i16;
 use std::u16;
 
+use array_macro::array;
+
 use envelope::*;
 use crate::emulator::ram::Ram;
 
@@ -12,8 +14,10 @@ const NUMBER_OF_DSP: usize = 8;
 const SAMPLE_BUFFER_SIZE: usize = 32;
 pub const CYCLE_RANGE: u16 = 30720;
 
+static mut GLOBAL_DSP: DSP = DSP::new();
+
 pub struct DSP {
-    blocks: Vec<DSPBlock>,
+    blocks: [DSPBlock; 8],
     master_vol_left: u8,
     master_vol_right: u8,
     echo_vol_left: u8,
@@ -51,8 +55,8 @@ pub struct DSP {
     unused_e: [u8; 8],    
 }
 
+#[derive(Clone)]
 pub struct DSPBlock {
-    pub idx: usize, // block id [0 - 7]
     pub reg: DSPRegister,
     
     buffer: [i16; SAMPLE_BUFFER_SIZE],
@@ -77,6 +81,7 @@ pub struct DSPBlock {
     key_on_delay: u8,
 }
 
+#[derive(Clone)]
 pub struct DSPRegister {
     pub vol_left: u8,
     pub vol_right: u8,
@@ -98,7 +103,7 @@ pub struct DSPRegister {
 }
 
 impl DSPRegister {
-    pub fn new() -> DSPRegister {
+    pub const fn new() -> DSPRegister {
         DSPRegister {
             vol_left: 0,
             vol_right: 0,
@@ -150,6 +155,7 @@ impl DSPRegister {
     }
 }
 
+#[derive(Clone)]
 struct BRRInfo {
     shift_amount: u8,
     filter: FilterType,
@@ -177,7 +183,7 @@ struct FIR {
 }
 
 impl FIR {
-    pub fn new() -> FIR {
+    pub const fn new() -> FIR {
         FIR {
             regs: [0; 8],
             filter: [0; 8],
@@ -209,9 +215,18 @@ impl FIR {
 }
 
 impl DSP {
-    pub fn new() -> DSP {
-        let blocks = (0..NUMBER_OF_DSP).map(|idx| DSPBlock::new(idx)).collect::<Vec<DSPBlock>>();
-
+    pub const fn new() -> DSP {
+        let blocks = [
+            DSPBlock::new(),
+            DSPBlock::new(),
+            DSPBlock::new(),
+            DSPBlock::new(),
+            DSPBlock::new(),
+            DSPBlock::new(),
+            DSPBlock::new(),
+            DSPBlock::new(),
+        ];
+            
         let mut dsp = DSP {
             blocks: blocks,
             master_vol_left: 0,
@@ -247,13 +262,15 @@ impl DSP {
             unused_e: [0; 8],
         };
 
-        dsp.reset();
         dsp
     }
 
-    pub fn new_with_init(regs: &[u8; 128]) -> DSP {
-        let blocks: Vec<DSPBlock> = (0..NUMBER_OF_DSP).map(|idx| DSPBlock::new_with_init(idx, regs)).collect();
-        let mut dsp = DSP::new();
+    pub fn init(regs: &[u8; 128]) {
+        let dsp = DSP::global();
+        let mut blocks = array![DSPBlock::new(); 8];
+        for (idx, blk) in blocks.iter_mut().enumerate() {
+            blk.init(idx, regs)
+        } 
 
         // initialized by regs
         dsp.blocks = blocks;
@@ -282,8 +299,10 @@ impl DSP {
 
         dsp.fir_left = FIR::new_with_init(fir_coefficients.clone());
         dsp.fir_right = FIR::new_with_init(fir_coefficients.clone());
+    }
 
-        dsp
+    pub fn global() -> &'static mut DSP {
+        unsafe { &mut GLOBAL_DSP }
     }
 
     pub fn cycles(&mut self, cycle_count: u16) -> () {
@@ -512,11 +531,11 @@ impl DSP {
     }
 
     pub fn reset(&mut self) -> () {
-        self.blocks.iter_mut().for_each(|blk| {            
+        for mut blk in self.blocks.iter_mut() {    
             blk.reg.voice_end = true;
             blk.reg.env = 0;
             blk.reg.out = 0;            
-        });
+        }
 
         self.echo_buffer_enable = false;
         self.is_mute = true;        
@@ -538,9 +557,8 @@ impl DSP {
 }
 
 impl DSPBlock {
-    pub fn new(idx: usize) -> DSPBlock {
+    pub const fn new() -> DSPBlock {
         DSPBlock {
-            idx: idx,
             reg: DSPRegister::new(),
 
             buffer: [0; SAMPLE_BUFFER_SIZE],
@@ -566,11 +584,8 @@ impl DSPBlock {
         }
     }
     
-    pub fn new_with_init(idx: usize, regs: &[u8; 128]) -> DSPBlock {
-        let mut init_block = DSPBlock::new(idx);
-        init_block.reg = DSPRegister::new_with_init(idx, regs);
-        
-        init_block
+    pub fn init(&mut self, idx: usize, regs: &[u8; 128]) {
+        self.reg = DSPRegister::new_with_init(idx, regs);    
     }
 
     pub fn flush(&mut self, before_out: Option<i16>, soft_reset: bool, cycle_counter: u16) -> () {                
@@ -662,7 +677,7 @@ impl DSPBlock {
 }
 
 impl BRRInfo {
-    pub fn new(format: u8) -> BRRInfo {
+    pub const fn new(format: u8) -> BRRInfo {
         let shift_amount = (format >> 4) & 0x0F;
         let filter = match (format >> 2) & 0b11 {
             0 => FilterType::NoFilter,
@@ -686,7 +701,7 @@ impl BRRInfo {
         }
     }
 
-    pub fn empty() -> BRRInfo {
+    pub const fn empty() -> BRRInfo {
         BRRInfo::new(0)
     }
 }
@@ -799,7 +814,7 @@ fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], s
 }
 
 // TODO: need echo accumulate implementation
-fn combine_all_sample(blocks: &Vec<DSPBlock>, dsp: &DSP) -> (i16, i16) {
+fn combine_all_sample(blocks: &[DSPBlock], dsp: &DSP) -> (i16, i16) {
     fn combine(samples: impl Iterator<Item = i32>, master_vol: i8) -> i16 {
         let acc: i32 = samples.fold(0, |acc, sample| {
             let sum = acc + sample;
@@ -824,7 +839,7 @@ fn combine_all_sample(blocks: &Vec<DSPBlock>, dsp: &DSP) -> (i16, i16) {
     } 
 }
 
-fn combine_echo(blocks: &Vec<DSPBlock>) -> (i16, i16) {
+fn combine_echo(blocks: &[DSPBlock]) -> (i16, i16) {
     fn combine(samples: impl Iterator<Item = i32>) -> i32 {
         samples.fold(0, |acc, sample| {
             let sum = acc + sample;
@@ -869,14 +884,10 @@ fn echo_process(left: i16, right: i16, dsp: &mut DSP) -> (i16, i16) {
 }
 
 fn echo_process_inner(echo_sample: i16, addr: usize, feedback_volume: i8, out_volume: i8, fir: &mut FIR) -> (i32, i16) {
-    let (fir_out, buf_echo) = {
-        let sample0 = (Ram::global().ram[addr + 1] as u16) << 8;
-        let sample1 = Ram::global().ram[addr] as u16;
-        let buf_echo = sample0 | sample1; 
-        let fir_out = fir.next(buf_echo as i16); 
-
-        (fir_out, buf_echo)
-    };
+    let sample0 = (Ram::global().ram[addr + 1] as u16) << 8;
+    let sample1 = Ram::global().ram[addr] as u16;
+    let buf_echo = sample0 | sample1; 
+    let fir_out = fir.next(buf_echo as i16); 
 
     let out_echo = ((fir_out as i32) * (out_volume as i32)) >> 7;
     let new_echo = (echo_sample as i32) + (((fir_out as i32) * (feedback_volume as i32)) >> 7);

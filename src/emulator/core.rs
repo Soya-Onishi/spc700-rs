@@ -13,7 +13,6 @@ use typenum::marker_traits::Unsigned;
 
 pub struct Spc700 {
     pub reg: Register,
-    pub dsp: DSP,
     timer: [Timer; 3],
     pub cycle_counter: u64,
     total_cycles: u64,
@@ -369,7 +368,7 @@ impl Spc700 {
     pub fn new_with_init<P: AsRef<Path>>(path: P) -> Result<Spc700> {
         let spc = Spc::load(path)?;
         Ram::init(&spc.ram, &spc.ipl_rom);
-        let dsp = DSP::new_with_init(&spc.regs);
+        DSP::init(&spc.regs);
 
         let divider0 = spc.ram[0x00FA];
         let divider1 = spc.ram[0x00FB];
@@ -391,7 +390,6 @@ impl Spc700 {
         
         Ok(Spc700 {
             reg: register,
-            dsp: dsp,
             timer: [timer[0], timer[1], timer[2]],            
             cycle_counter: 0,
             total_cycles: 0,
@@ -402,7 +400,6 @@ impl Spc700 {
     pub fn new(init_pc: u16) -> Spc700 {
         Spc700 {
             reg: Register::new(init_pc),
-            dsp: DSP::new(),
             timer: [Timer::new(8000), Timer::new(8000), Timer::new(64000)],            
             cycle_counter: 0,
             total_cycles: 0,
@@ -412,22 +409,22 @@ impl Spc700 {
 
     pub fn next_sample(&mut self) -> (i16, i16) {        
         loop {
-            let before_cycle_count = self.dsp.sync_counter;
+            let before_cycle_count = DSP::global().sync_counter;
             self.clock();
-            let after_cycle_count = self.dsp.sync_counter;
+            let after_cycle_count = DSP::global().sync_counter;
 
             if before_cycle_count > after_cycle_count {
                 break;
             }
         }        
 
-        (self.dsp.sample_left_out(), self.dsp.sample_right_out())
+        (DSP::global().sample_left_out(), DSP::global().sample_right_out())
     }
     
     fn clock(&mut self) -> () {
         if self.is_stopped {
             self.count_cycles(2);
-            self.dsp.flush();
+            DSP::global().flush();
             return;
         }
 
@@ -441,7 +438,7 @@ impl Spc700 {
         log::debug!("op: {:04x}, {}", opcode, &self.reg);
 
         self.count_cycles(cycles as u16);
-        self.dsp.flush();
+        DSP::global().flush();
     }
 
     fn mov_reg_imm(&mut self, opcode: u8) -> OperationResult<()> {
@@ -2013,7 +2010,7 @@ impl Spc700 {
     }    
 
     fn read_ram(&mut self, addr: u16) -> OperationResult<u8> {
-        let ret = Ram::global().read(addr, &mut self.dsp, &mut self.timer);
+        let ret = Ram::global().read(addr, &mut self.timer);
         OperationResult { cycles: 1, ret }
     }    
 
@@ -2028,12 +2025,12 @@ impl Spc700 {
     }
 
     fn write_ram(&mut self, addr: u16, data: u8) -> OperationResult<()> {
-        Ram::global().write(addr, data, &mut self.dsp, &mut self.timer);
+        Ram::global().write(addr, data, &mut self.timer);
         OperationResult::new((), 1)
     }
 
     pub fn count_cycles(&mut self, cycle_count: u16) -> () {        
-        self.dsp.cycles(cycle_count);
+        DSP::global().cycles(cycle_count);
         self.timer.iter_mut().for_each(|timer| timer.cycles(cycle_count));
         self.cycle_counter += cycle_count as u64;
         self.total_cycles += cycle_count as u64;

@@ -48,7 +48,7 @@ const BOOT_ROM_DATA: [u8; 64] = [
     0xC0, 0xFF,       // dw   0xFFC0
 ];
 
-static RAM: Mutex<Ram> = Mutex::new(Ram::new());
+static mut RAM: Ram = Ram::new();
 
 pub struct Ram {
     pub ram: [u8; 0x10000],
@@ -93,8 +93,8 @@ impl Ram {
     }
 
     #[inline]
-    pub fn global() -> std::sync::MutexGuard<'static, Ram> {
-        RAM.lock().unwrap()
+    pub fn global() -> &'static mut Ram {
+        unsafe { &mut RAM }
     }
 
     pub fn load(&mut self, filename: String, start_pos: u16, set_pos: u16) {
@@ -111,10 +111,10 @@ impl Ram {
         }
     }
 
-    pub fn read(&mut self, addr: u16, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {
+    pub fn read(&mut self, addr: u16, timer: &mut [Timer; 3]) -> u8 {
         log::debug!("ram[r] addr: {:06x}", addr);
         if (0x00F0..=0x00FF).contains(&addr) {
-            self.read_from_io(addr as usize, dsp, timer)
+            self.read_from_io(addr as usize, timer)
         } else if(0xFFC0..=0xFFFF).contains(&addr) && !self.rom_writable {
             self.rom[(addr - 0xFFC0) as usize]
         } else {
@@ -127,25 +127,25 @@ impl Ram {
         self.ram[addr as usize]
     }
 
-    fn read_from_io(&mut self, addr: usize, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {     
-        fn zero(_ram: &mut Ram, _addr: usize, _dsp: &mut DSP, _timer: &mut [Timer; 3]) -> u8 {
+    fn read_from_io(&mut self, addr: usize, timer: &mut [Timer; 3]) -> u8 {     
+        fn zero(_ram: &mut Ram, _addr: usize, _timer: &mut [Timer; 3]) -> u8 {
             0
         }
 
-        fn dsp_addr(ram: &mut Ram, _addr: usize, _dsp: &mut DSP, _timer: &mut [Timer; 3]) -> u8 {
+        fn dsp_addr(ram: &mut Ram, _addr: usize, _timer: &mut [Timer; 3]) -> u8 {
             ram.dsp_addr
         }
 
-        fn read_from_dsp(ram: &mut Ram, _addr: usize, dsp: &mut DSP, _timer: &mut [Timer; 3]) -> u8 {
-            dsp.read_from_register(ram.dsp_addr as usize)
+        fn read_from_dsp(ram: &mut Ram, _addr: usize, _timer: &mut [Timer; 3]) -> u8 {
+            DSP::global().read_from_register(ram.dsp_addr as usize)
         }
 
         
-        fn read_from_ram(ram: &mut Ram, addr: usize, _dsp: &mut DSP, _timer: &mut [Timer; 3]) -> u8 {
+        fn read_from_ram(ram: &mut Ram, addr: usize, _timer: &mut [Timer; 3]) -> u8 {
             ram.ram[addr]
         }
 
-        fn read_from_timer(_ram: &mut Ram, addr: usize, _dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {
+        fn read_from_timer(_ram: &mut Ram, addr: usize, timer: &mut [Timer; 3]) -> u8 {
             let idx = (addr & 0xF) - 0xD;
             timer[idx].read_out()
         } 
@@ -174,7 +174,7 @@ impl Ram {
             read_from_timer,
         ];
 
-        table[idx](self, addr, dsp, timer)
+        table[idx](self, addr, timer)
 
         // match idx {
             // 0x0 => 0, // self.ram[addr], // test is write only
@@ -192,24 +192,24 @@ impl Ram {
         // }
     }
 
-    pub fn write(&mut self, addr: u16, data: u8, dsp: &mut DSP, timer: &mut [Timer; 3]) -> () {
+    pub fn write(&mut self, addr: u16, data: u8, timer: &mut [Timer; 3]) -> () {
         log::debug!("ram[w] addr: {:06x}, data: {:04x}", addr, data);
 
         match addr {
             0x0000..=0x00EF => self.ram[addr as usize] = data,         // RAM (typically used for CPU pointers/variables)
-            0x00F0..=0x00FF => self.write_to_io(addr as usize, data, dsp, timer),  // I/O Ports (writes are also passed to RAM)
+            0x00F0..=0x00FF => self.write_to_io(addr as usize, data, timer),  // I/O Ports (writes are also passed to RAM)
             0x0100..=0x01FF => self.ram[addr as usize] = data,         // RAM (typically used for CPU stack)
             0x0200..=0xFFBF => self.ram[addr as usize] = data,         // RAM (code ,data, dir-table, brr-samples, echo-buffer, etc..)
             0xFFC0..=0xFFFF => self.ram[addr as usize] = data,                
         };     
     }
 
-    fn write_to_io(&mut self, addr: usize, data: u8, dsp: &mut DSP, timer: &mut [Timer; 3]) -> () {    
+    fn write_to_io(&mut self, addr: usize, data: u8, timer: &mut [Timer; 3]) -> () {    
         match addr {
             0x00F0 => self.write_to_test(data),
             0x00F1 => self.write_to_control(data, timer), 
             0x00F2 => self.dsp_addr = data,
-            0x00F3 => dsp.write_to_register(self.dsp_addr as usize, data),            
+            0x00F3 => DSP::global().write_to_register(self.dsp_addr as usize, data),            
             0x00F4..=0x00F7 => (), // nothing to do (write to CPUIO for S-CPU(nor main CPU), but this is not functional for this emulator)
             0x00F8 => self.ram[addr] = data, // each AUXIO has no functionality
             0x00F9 => self.ram[addr] = data,

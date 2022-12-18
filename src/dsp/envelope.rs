@@ -54,7 +54,7 @@ pub struct Envelope {
 }
 
 impl Envelope {    
-    pub fn new(level: i16, hidden_level: i16, adsr_mode: ADSRMode) -> Envelope {
+    pub const fn new(level: i16, hidden_level: i16, adsr_mode: ADSRMode) -> Envelope {
         Envelope { level, hidden_level, adsr_mode }
     }
 
@@ -66,7 +66,7 @@ impl Envelope {
         }
     }
 
-    pub fn empty() -> Envelope {
+    pub const fn empty() -> Envelope {
         Envelope::new(0, 0, ADSRMode::Release)
     }
 
