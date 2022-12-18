@@ -2001,9 +2001,7 @@ impl Spc700 {
     }
 
     fn read_from_pc(&mut self) -> OperationResult<u8> {
-        let addr = self.reg.pc;
-        self.reg.inc_pc(1);
-    
+        let addr = self.reg.inc_pc(1);    
         self.read_ram(addr)
     }
 
