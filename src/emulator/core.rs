@@ -13,7 +13,6 @@ use typenum::marker_traits::Unsigned;
 
 pub struct Spc700 {
     pub reg: Register,
-    pub ram: Ram,
     pub dsp: DSP,
     timer: [Timer; 3],
     pub cycle_counter: u64,
@@ -369,7 +368,7 @@ const DECODE_TABLE: [fn(&mut Spc700, u8) -> OperationResult<()>; 256] = [
 impl Spc700 {
     pub fn new_with_init<P: AsRef<Path>>(path: P) -> Result<Spc700> {
         let spc = Spc::load(path)?;
-        let ram = Ram::new_with_init(&spc.ram, &spc.ipl_rom);
+        Ram::init(&spc.ram, &spc.ipl_rom);
         let dsp = DSP::new_with_init(&spc.regs);
 
         let divider0 = spc.ram[0x00FA];
@@ -392,7 +391,6 @@ impl Spc700 {
         
         Ok(Spc700 {
             reg: register,
-            ram: ram,
             dsp: dsp,
             timer: [timer[0], timer[1], timer[2]],            
             cycle_counter: 0,
@@ -404,7 +402,6 @@ impl Spc700 {
     pub fn new(init_pc: u16) -> Spc700 {
         Spc700 {
             reg: Register::new(init_pc),
-            ram: Ram::new(),
             dsp: DSP::new(),
             timer: [Timer::new(8000), Timer::new(8000), Timer::new(64000)],            
             cycle_counter: 0,
@@ -430,7 +427,7 @@ impl Spc700 {
     fn clock(&mut self) -> () {
         if self.is_stopped {
             self.count_cycles(2);
-            self.dsp.flush(&mut self.ram);
+            self.dsp.flush();
             return;
         }
 
@@ -444,7 +441,7 @@ impl Spc700 {
         log::debug!("op: {:04x}, {}", opcode, &self.reg);
 
         self.count_cycles(cycles as u16);
-        self.dsp.flush(&mut self.ram);
+        self.dsp.flush();
     }
 
     fn mov_reg_imm(&mut self, opcode: u8) -> OperationResult<()> {
@@ -2016,7 +2013,7 @@ impl Spc700 {
     }    
 
     fn read_ram(&mut self, addr: u16) -> OperationResult<u8> {
-        let ret = self.ram.read(addr, &mut self.dsp, &mut self.timer);
+        let ret = Ram::global().read(addr, &mut self.dsp, &mut self.timer);
         OperationResult { cycles: 1, ret }
     }    
 
@@ -2031,7 +2028,7 @@ impl Spc700 {
     }
 
     fn write_ram(&mut self, addr: u16, data: u8) -> OperationResult<()> {
-        self.ram.write(addr, data, &mut self.dsp, &mut self.timer);
+        Ram::global().write(addr, data, &mut self.dsp, &mut self.timer);
         OperationResult::new((), 1)
     }
 

@@ -1,6 +1,10 @@
 use crate::dsp::DSP;
 use crate::emulator::timer::Timer;
+
 use std::fs;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
 
 const BOOT_ROM_DATA: [u8; 64] = [
     0xCD, 0xEF,       // mov  x, EF    
@@ -44,6 +48,8 @@ const BOOT_ROM_DATA: [u8; 64] = [
     0xC0, 0xFF,       // dw   0xFFC0
 ];
 
+static RAM: Mutex<Ram> = Mutex::new(Ram::new());
+
 pub struct Ram {
     pub ram: [u8; 0x10000],
     rom: [u8; 64],
@@ -57,7 +63,7 @@ pub struct Ram {
 }
 
 impl Ram {
-    pub fn new() -> Ram {
+    pub const fn new() -> Ram {
         Ram {
             ram: [0; 0x10000],
             rom: BOOT_ROM_DATA,
@@ -71,24 +77,24 @@ impl Ram {
         }        
     }
 
-    pub fn new_with_init(ram: &[u8; 0x10000], rom: &[u8; 64]) -> Ram {
+    pub fn init(ram: &[u8; 0x10000], rom: &[u8; 64]) {
         let test = ram[0x00F0];
         let control = ram[0x00F1];
         let dsp_addr = ram[0x00F2];
         let ram_writable = (test & 2) > 0;
         let rom_writable = (control & 0x80) == 0;
 
-        Ram {
-            ram: ram.clone(),
-            rom: rom.clone(),
-            read_log: Vec::new(),
-            write_log: Vec::new(),
+        let mut global = Self::global();
+        global.ram.copy_from_slice(ram);
+        global.rom.copy_from_slice(rom);
+        global.ram_writable = ram_writable;
+        global.rom_writable = rom_writable;
+        global.dsp_addr = dsp_addr; 
+    }
 
-            ram_writable: ram_writable,
-            rom_writable: rom_writable,
-
-            dsp_addr: dsp_addr,
-        }
+    #[inline]
+    pub fn global() -> std::sync::MutexGuard<'static, Ram> {
+        RAM.lock().unwrap()
     }
 
     pub fn load(&mut self, filename: String, start_pos: u16, set_pos: u16) {
@@ -114,6 +120,11 @@ impl Ram {
         } else {
             self.ram[addr as usize]
         }
+    }
+
+    #[inline]
+    pub fn read_ram(&self, addr: u16) -> u8 {
+        self.ram[addr as usize]
     }
 
     fn read_from_io(&mut self, addr: usize, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {     

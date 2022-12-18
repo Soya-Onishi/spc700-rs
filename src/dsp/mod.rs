@@ -290,16 +290,16 @@ impl DSP {
         self.sync_counter += cycle_count
     }
 
-    pub fn flush(&mut self, ram: &mut Ram) -> () {       
+    pub fn flush(&mut self) -> () {       
         let flush_count = self.sync_counter / 64;
         if flush_count != 0 {
             let next_sync_counter = self.sync_counter % 64;
-            self.exec_flush(ram);
+            self.exec_flush();
             self.sync_counter = next_sync_counter;
         } 
     }
 
-    fn exec_flush(&mut self, ram: &mut Ram) -> () {        
+    fn exec_flush(&mut self) -> () {        
         let table_addr = self.table_addr as u16;
         let soft_reset = self.soft_reset && self.flag_is_modified;
         let cycle_counter = self.counter;            
@@ -307,11 +307,11 @@ impl DSP {
         self.blocks.iter_mut().fold(Option::<i16>::None, |before_out, blk| {
             // ready for next brr block by key on            
             if blk.reg.key_on && blk.reg.key_on_is_modified {
-                let tab_addr = (table_addr * 256 + (blk.reg.srcn as u16 * 4)) as usize;
-                let start0 = ram.ram[tab_addr] as u16;
-                let start1 = ram.ram[tab_addr + 1] as u16;
-                let loop0 = ram.ram[tab_addr + 2] as u16;
-                let loop1 = ram.ram[tab_addr + 3] as u16;
+                let tab_addr = table_addr * 256 + (blk.reg.srcn as u16 * 4);
+                let start0 = Ram::global().read_ram(tab_addr) as u16;
+                let start1 = Ram::global().read_ram(tab_addr + 1) as u16;
+                let loop0 = Ram::global().read_ram(tab_addr + 2) as u16;
+                let loop1 = Ram::global().read_ram(tab_addr + 3) as u16;
 
                 blk.pitch_counter = 0x0000;
                 
@@ -336,7 +336,7 @@ impl DSP {
             // fetch brr block
             if (blk.reg.key_on && blk.reg.key_on_is_modified) || blk.require_next {
                 let addr = blk.src_addr as usize;                
-                let brr_block = &ram.ram[addr..addr + 9];                
+                let brr_block = &Ram::global().ram[addr..addr + 9];                
 
                 blk.base_idx = (blk.base_idx + 16) % SAMPLE_BUFFER_SIZE;
                 blk.brr_info = BRRInfo::new(brr_block[0]);                
@@ -349,7 +349,7 @@ impl DSP {
 
         let (left, right) = combine_all_sample(&self.blocks, self);         
         let (echo_left, echo_right) = combine_echo(&self.blocks);        
-        let (left_echo, right_echo) = echo_process(echo_left, echo_right, self, ram);
+        let (left_echo, right_echo) = echo_process(echo_left, echo_right, self);
 
         let left_out = (left as i32) + (left_echo as i32);
         let right_out = (right as i32) + (right_echo as i32);
@@ -452,14 +452,17 @@ impl DSP {
             (  0x3, 0xC) => self.echo_vol_right = data,
             (  0x4, 0xC) => {                
                 let bools = u8_to_vec(data);                
-                self.blocks.iter_mut().zip(bools.iter()).for_each(|(blk, &is_on)| {                    
-                    blk.reg.key_on = is_on;
-                    blk.reg.key_on_is_modified = is_on;
-                });
+                self.blocks.iter_mut()
+                    .zip(bools)
+                    .filter(|(_, is_on)| *is_on)
+                    .for_each(|(blk, is_on)| { 
+                        blk.reg.key_on = is_on;
+                        blk.reg.key_on_is_modified = is_on;
+                    });
             }
             (  0x5, 0xC) => {
                 let bools = u8_to_vec(data);
-                self.blocks.iter_mut().zip(bools.iter()).for_each(|(blk, &is_off)| {
+                self.blocks.iter_mut().zip(bools).for_each(|(blk, is_off)| {
                     blk.reg.key_off = is_off;
                 });
             }
@@ -480,19 +483,19 @@ impl DSP {
             (  0x1, 0xD) => self.unused_1d = data,
             (  0x2, 0xD) => {
                 let bools = u8_to_vec(data);
-                self.blocks.iter_mut().zip(bools.iter()).for_each(|(blk, &is_enable)| {
+                self.blocks.iter_mut().zip(bools).for_each(|(blk, is_enable)| {
                     blk.reg.pmon_enable = is_enable;
                 });
             }
             (  0x3, 0xD) => {
                 let bools = u8_to_vec(data);
-                self.blocks.iter_mut().zip(bools.iter()).for_each(|(blk, &is_enable)| {
+                self.blocks.iter_mut().zip(bools).for_each(|(blk, is_enable)| {
                     blk.reg.noise_enable = is_enable;
                 });
             }
             (  0x4, 0xD) => {
                 let bools = u8_to_vec(data);
-                self.blocks.iter_mut().zip(bools.iter()).for_each(|(blk, &is_enable)| {
+                self.blocks.iter_mut().zip(bools).for_each(|(blk, is_enable)| {
                     blk.reg.echo_enable = is_enable;
                 });
             }
@@ -651,6 +654,10 @@ impl DSPBlock {
             self.echo_left = 0;
             self.echo_right = 0;
         }            
+    }
+
+    pub fn key_on_kicked(&mut self) {
+
     }
 }
 
@@ -833,10 +840,11 @@ fn combine_echo(blocks: &Vec<DSPBlock>) -> (i16, i16) {
     (left as i16, right as i16)
 }
 
-fn echo_process(left: i16, right: i16, dsp: &mut DSP, ram: &mut Ram) -> (i16, i16) {    
+fn echo_process(left: i16, right: i16, dsp: &mut DSP) -> (i16, i16) {    
     let buffer_addr = ((dsp.echo_ring_buffer_addr + dsp.echo_pos) & 0xFFFF) as usize;
-    let (left_out, left_new_echo) = echo_process_inner(left, buffer_addr, dsp.echo_feedback_volume as i8, dsp.echo_vol_left as i8, &mut dsp.fir_left, ram);
-    let (right_out, right_new_echo) = echo_process_inner(right, buffer_addr + 2, dsp.echo_feedback_volume as i8, dsp.echo_vol_right as i8, &mut dsp.fir_right, ram);    
+
+    let (left_out, left_new_echo) = echo_process_inner(left, buffer_addr, dsp.echo_feedback_volume as i8, dsp.echo_vol_left as i8, &mut dsp.fir_left);
+    let (right_out, right_new_echo) = echo_process_inner(right, buffer_addr + 2, dsp.echo_feedback_volume as i8, dsp.echo_vol_right as i8, &mut dsp.fir_right);    
 
     if dsp.echo_buffer_enable {
         let left_lower  = left_new_echo as u8;
@@ -845,7 +853,7 @@ fn echo_process(left: i16, right: i16, dsp: &mut DSP, ram: &mut Ram) -> (i16, i1
         let right_upper = (right_new_echo >> 8) as u8;
 
         [left_lower, left_upper, right_lower, right_upper].iter().zip(0..).for_each (|(&sample, idx)| {
-            ram.ram[buffer_addr + idx] = sample;
+            Ram::global().ram[buffer_addr + idx] = sample;
         });
     }
 
@@ -860,10 +868,16 @@ fn echo_process(left: i16, right: i16, dsp: &mut DSP, ram: &mut Ram) -> (i16, i1
     (left_out as i16, right_out as i16)
 }
 
-fn echo_process_inner(echo_sample: i16, addr: usize, feedback_volume: i8, out_volume: i8, fir: &mut FIR, ram: &Ram) -> (i32, i16) {
-    let buf_echo = ((ram.ram[addr + 1] as u16) << 8) | (ram.ram[addr]) as u16;
-    let fir_out = fir.next(buf_echo as i16);
-    
+fn echo_process_inner(echo_sample: i16, addr: usize, feedback_volume: i8, out_volume: i8, fir: &mut FIR) -> (i32, i16) {
+    let (fir_out, buf_echo) = {
+        let sample0 = (Ram::global().ram[addr + 1] as u16) << 8;
+        let sample1 = Ram::global().ram[addr] as u16;
+        let buf_echo = sample0 | sample1; 
+        let fir_out = fir.next(buf_echo as i16); 
+
+        (fir_out, buf_echo)
+    };
+
     let out_echo = ((fir_out as i32) * (out_volume as i32)) >> 7;
     let new_echo = (echo_sample as i32) + (((fir_out as i32) * (feedback_volume as i32)) >> 7);
     let new_echo = 
@@ -876,12 +890,12 @@ fn echo_process_inner(echo_sample: i16, addr: usize, feedback_volume: i8, out_vo
     (out_echo, new_echo as i16)
 }
 
-fn u8_to_vec(v: u8) -> Vec<bool> {
-    let f = |value: u8, shamt: u8| -> bool {
+fn u8_to_vec(v: u8) -> impl Iterator<Item = bool> {
+    fn extract_bit(value: u8, shamt: u8) -> bool {
         ((value >> shamt) & 1) == 1
-    };
+    }
 
-    (0..8).map(|shamt| f(v, shamt)).collect()
+    (0..8).map(move |shamt| extract_bit(v, shamt))
 }
 
 fn vec_to_u8(bools: impl Iterator<Item = bool>) -> u8 {
