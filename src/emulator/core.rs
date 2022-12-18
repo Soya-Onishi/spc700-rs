@@ -15,7 +15,7 @@ pub struct Spc700 {
     pub reg: Register,
     pub ram: Ram,
     pub dsp: DSP,
-    pub timer: [Timer; 3],
+    timer: [Timer; 3],
     pub cycle_counter: u64,
     total_cycles: u64,
     is_stopped: bool
