@@ -1,8 +1,8 @@
 use super::DSPRegister;
-use super::SAMPLE_BUFFER_SIZE;
 use super::brr::{BRRInfo, BRREnd};
 use super::envelope::{Envelope, ADSRMode};
 use super::gaussian_table;
+use super::SAMPLE_BUFFER_SIZE;
 
 #[derive(Clone)]
 pub struct DSPBlock {
@@ -143,10 +143,6 @@ impl DSPBlock {
             self.echo_left = 0;
             self.echo_right = 0;
         }            
-    }
-
-    pub fn key_on_kicked(&mut self) {
-
     }
 }
 

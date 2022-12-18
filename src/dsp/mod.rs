@@ -13,7 +13,6 @@ use crate::emulator::ram::Ram;
 use block::DSPBlock;
 use brr::{BRRInfo, FilterType};
 
-const NUMBER_OF_DSP: usize = 8;
 const SAMPLE_BUFFER_SIZE: usize = 32;
 pub const CYCLE_RANGE: u16 = 30720;
 
@@ -182,7 +181,7 @@ impl DSP {
             DSPBlock::new(),
         ];
             
-        let mut dsp = DSP {
+        let dsp = DSP {
             blocks: blocks,
             master_vol_left: 0,
             master_vol_right: 0,

@@ -2,9 +2,6 @@ use crate::dsp::DSP;
 use crate::emulator::timer::Timer;
 
 use std::fs;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::MutexGuard;
 
 const BOOT_ROM_DATA: [u8; 64] = [
     0xCD, 0xEF,       // mov  x, EF    
