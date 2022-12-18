@@ -107,15 +107,13 @@ impl Ram {
 
     pub fn read(&mut self, addr: u16, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {
         log::debug!("ram[r] addr: {:06x}", addr);
-
-        let mut data = self.ram[addr as usize];
         if (0x00F0..=0x00FF).contains(&addr) {
-            data = self.read_from_io(addr as usize, dsp, timer);
+            self.read_from_io(addr as usize, dsp, timer)
         } else if(0xFFC0..=0xFFFF).contains(&addr) && !self.rom_writable {
-            data = self.rom[(addr - 0xFFC0) as usize];
+            self.rom[(addr - 0xFFC0) as usize]
+        } else {
+            self.ram[addr as usize]
         }
-
-        data
     }
 
     fn read_from_io(&mut self, addr: usize, dsp: &mut DSP, timer: &mut [Timer; 3]) -> u8 {     
