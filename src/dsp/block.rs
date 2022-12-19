@@ -123,10 +123,9 @@ impl DSPBlock {
         if soft_reset {
             self.reg.key_off = soft_reset;            
         }
-        self.key_on_delay = self.key_on_delay.saturating_sub(1);
 
         // output sample of left and right
-        if self.key_on_delay == 0 {
+        if self.key_on_delay <= 0 {
             let left_vol = (self.reg.vol_left as i8) as i32;
             let right_vol = (self.reg.vol_right as i8) as i32;
             
@@ -142,6 +141,7 @@ impl DSPBlock {
             self.sample_right = 0;
             self.echo_left = 0;
             self.echo_right = 0;
+            self.key_on_delay -= 1;
         }            
     }
 }

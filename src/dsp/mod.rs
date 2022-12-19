@@ -288,7 +288,7 @@ impl DSP {
 
                 blk.pitch_counter = 0x0000;
                 
-                blk.buffer = [0; SAMPLE_BUFFER_SIZE];
+                blk.buffer.fill(0);
                 blk.base_idx = 0;
 
                 blk.start_addr = start0 | (start1 << 8);                
