@@ -63,8 +63,6 @@ impl DSPBlock {
     }
 
     pub fn flush(&mut self, before_out: Option<i16>, soft_reset: bool, cycle_counter: u16) -> () {                
-        let key_on_kicked = self.reg.key_on && self.reg.key_on_is_modified;     
-
         // fetch brr nibbles 
         let brr_info = &self.brr_info;
         
@@ -80,7 +78,7 @@ impl DSPBlock {
         // envelope        
         let is_brr_end = brr_info.end == BRREnd::Mute;        
         let envelope_level = 
-            if is_brr_end || key_on_kicked || soft_reset || self.key_on_delay > 0 {
+            if is_brr_end || soft_reset || self.key_on_delay > 0 {
                 0
             } else {
                 self.envelope.level
@@ -88,8 +86,6 @@ impl DSPBlock {
         let envelope_mode =
             if is_brr_end || self.reg.key_off || soft_reset {
                 ADSRMode::Release
-            } else if key_on_kicked {
-                ADSRMode::Attack
             } else {
                 self.envelope.adsr_mode
             };

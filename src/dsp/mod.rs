@@ -12,6 +12,7 @@ use array_macro::array;
 use crate::emulator::ram::Ram;
 use block::DSPBlock;
 use brr::{BRRInfo, FilterType};
+use envelope::ADSRMode;
 
 const SAMPLE_BUFFER_SIZE: usize = 32;
 pub const CYCLE_RANGE: u16 = 30720;
@@ -431,6 +432,8 @@ impl DSP {
                     .for_each(|(blk, is_on)| { 
                         blk.reg.key_on = is_on;
                         blk.reg.key_on_is_modified = is_on;
+                        blk.envelope.adsr_mode = ADSRMode::Attack;
+                        blk.envelope.level = 0;
                     });
             }
             (  0x5, 0xC) => {
