@@ -281,21 +281,7 @@ impl DSP {
         self.blocks.iter_mut().fold(Option::<i16>::None, |before_out, blk| {
             // ready for next brr block by key on            
             if blk.reg.key_on && blk.reg.key_on_is_modified {
-                let tab_addr = table_addr * 256 + (blk.reg.srcn as u16 * 4);
-                let start0 = Ram::global().read_ram(tab_addr) as u16;
-                let start1 = Ram::global().read_ram(tab_addr + 1) as u16;
-                let loop0 = Ram::global().read_ram(tab_addr + 2) as u16;
-                let loop1 = Ram::global().read_ram(tab_addr + 3) as u16;
-
-                blk.pitch_counter = 0x0000;
                 
-                blk.buffer.fill(0);
-                blk.base_idx = 0;
-
-                blk.start_addr = start0 | (start1 << 8);                
-                blk.loop_addr = loop0 | (loop1 << 8);
-                blk.src_addr = blk.start_addr;
-                blk.key_on_delay = 5;
             }
 
             // ready for next brr block by normal or loop
@@ -434,6 +420,23 @@ impl DSP {
                         blk.reg.key_on_is_modified = is_on;
                         blk.envelope.adsr_mode = ADSRMode::Attack;
                         blk.envelope.level = 0;
+
+                        let table_addr = self.table_addr as u16;
+                        let table_addr = table_addr * 256 + (blk.reg.srcn as u16 * 4);
+                        let start0 = Ram::global().read_ram(table_addr) as u16;
+                        let start1 = Ram::global().read_ram(table_addr + 1) as u16;
+                        let loop0 = Ram::global().read_ram(table_addr + 2) as u16;
+                        let loop1 = Ram::global().read_ram(table_addr + 3) as u16;
+
+                        blk.pitch_counter = 0x0000;
+                
+                        blk.buffer.fill(0);
+                        blk.base_idx = 0;
+
+                        blk.start_addr = start0 | (start1 << 8);                
+                        blk.loop_addr = loop0 | (loop1 << 8);
+                        blk.src_addr = blk.start_addr;
+                        blk.key_on_delay = 5;
                     });
             }
             (  0x5, 0xC) => {
