@@ -224,8 +224,15 @@ impl DSP {
         let dsp = DSP::global();
         let mut blocks = array![DSPBlock::new(); 8];
         for (idx, blk) in blocks.iter_mut().enumerate() {
-            blk.init(idx, regs)
-        } 
+            blk.init(idx, regs);
+        }
+        
+        // 初期化時にkonフラグが立っている場合、keyon処理を行う
+        for (kon, blk) in u8_to_vec(regs[0x4C]).zip(blocks.iter_mut()) {
+            if kon {
+                blk.keyon(regs[0x5D] as u16);
+            }
+        }
 
         // initialized by regs
         dsp.blocks = blocks;
@@ -415,28 +422,8 @@ impl DSP {
                 self.blocks.iter_mut()
                     .zip(bools)
                     .filter(|(_, is_on)| *is_on)
-                    .for_each(|(blk, is_on)| { 
-                        blk.reg.key_on = is_on;
-                        blk.reg.key_on_is_modified = is_on;
-                        blk.envelope.adsr_mode = ADSRMode::Attack;
-                        blk.envelope.level = 0;
-
-                        let table_addr = self.table_addr as u16;
-                        let table_addr = table_addr * 256 + (blk.reg.srcn as u16 * 4);
-                        let start0 = Ram::global().read_ram(table_addr) as u16;
-                        let start1 = Ram::global().read_ram(table_addr + 1) as u16;
-                        let loop0 = Ram::global().read_ram(table_addr + 2) as u16;
-                        let loop1 = Ram::global().read_ram(table_addr + 3) as u16;
-
-                        blk.pitch_counter = 0x0000;
-                
-                        blk.buffer.fill(0);
-                        blk.base_idx = 0;
-
-                        blk.start_addr = start0 | (start1 << 8);                
-                        blk.loop_addr = loop0 | (loop1 << 8);
-                        blk.src_addr = blk.start_addr;
-                        blk.key_on_delay = 5;
+                    .for_each(|(blk, _)| { 
+                       blk.keyon(self.table_addr as u16);
                     });
             }
             (  0x5, 0xC) => {

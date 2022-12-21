@@ -4,6 +4,8 @@ use super::envelope::{Envelope, ADSRMode};
 use super::gaussian_table;
 use super::SAMPLE_BUFFER_SIZE;
 
+use crate::emulator::ram::Ram;
+
 #[derive(Clone)]
 pub struct DSPBlock {
     pub reg: DSPRegister,
@@ -139,6 +141,29 @@ impl DSPBlock {
             self.echo_right = 0;
             self.key_on_delay -= 1;
         }            
+    }
+
+    pub fn keyon(&mut self, table_addr: u16) {
+        self.reg.key_on = true;
+        self.reg.key_on_is_modified = true;
+        self.envelope.adsr_mode = ADSRMode::Attack;
+        self.envelope.level = 0;
+
+        let table_addr = table_addr * 256 + (self.reg.srcn as u16 * 4);
+        let start0 = Ram::global().read_ram(table_addr) as u16;
+        let start1 = Ram::global().read_ram(table_addr + 1) as u16;
+        let loop0 = Ram::global().read_ram(table_addr + 2) as u16;
+        let loop1 = Ram::global().read_ram(table_addr + 3) as u16;
+
+        self.pitch_counter = 0x0000;
+                
+        self.buffer.fill(0);
+        self.base_idx = 0;
+
+        self.start_addr = start0 | (start1 << 8);                
+        self.loop_addr = loop0 | (loop1 << 8);
+        self.src_addr = self.start_addr;
+        self.key_on_delay = 5;
     }
 }
 
