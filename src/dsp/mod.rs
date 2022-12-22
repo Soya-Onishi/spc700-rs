@@ -11,8 +11,7 @@ use array_macro::array;
 
 use crate::emulator::ram::Ram;
 use block::DSPBlock;
-use brr::{BRRInfo, FilterType};
-use envelope::ADSRMode;
+use brr::FilterType;
 
 const SAMPLE_BUFFER_SIZE: usize = 32;
 pub const CYCLE_RANGE: u16 = 30720;
@@ -69,8 +68,6 @@ pub struct DSPRegister {
     pub env: u8,
     pub out: u8,  
     
-    pub key_on: bool,
-    pub key_on_is_modified: bool, 
     pub key_off: bool,    
 
     pub voice_end: bool,
@@ -91,8 +88,6 @@ impl DSPRegister {
             env: 0,
             out: 0,
 
-            key_on: false,
-            key_on_is_modified: false,        
             key_off: false,
 
             voice_end: false,
@@ -120,8 +115,6 @@ impl DSPRegister {
             env:  regs[addr(8)],
             out:  regs[addr(9)],
             
-            key_on: bit(idx as u8, regs[0x4C]),
-            key_on_is_modified: bit(idx as u8, regs[0x4C]),
             key_off: bit(idx as u8, regs[0x5C]),
 
             voice_end: bit(idx as u8, regs[0x7C]),

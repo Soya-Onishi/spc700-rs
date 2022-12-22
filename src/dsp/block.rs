@@ -156,8 +156,6 @@ impl DSPBlock {
     }
 
     pub fn keyon(&mut self, table_addr: u16) {
-        self.reg.key_on = true;
-        self.reg.key_on_is_modified = true;
         self.envelope.adsr_mode = ADSRMode::Attack;
         self.envelope.level = 0;
 
