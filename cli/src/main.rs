@@ -97,7 +97,8 @@ struct Args {
 
 fn main() -> Result<(), Error> {
     let args = Args::parse(); 
-    let emulator = SPC700::new_with_init(Path::new(&args.file))?;
+    let mut emulator = SPC700::new();
+    emulator.load(&Path::new(&args.file))?;
     Amplifier::play(emulator, args.duration);
 
     Ok(())

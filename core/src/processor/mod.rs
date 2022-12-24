@@ -10,8 +10,9 @@ use crate::dsp::DSP;
 use timer::Timer;
 
 use std::io::Result;
-use std::path::Path;
 use spc::spc::Spc;
+
+use std::path;
 
 use typenum::marker_traits::Unsigned;
 
@@ -369,8 +370,18 @@ const DECODE_TABLE: [fn(&mut Spc700, u8) -> OperationResult<()>; 256] = [
 ];
 
 impl Spc700 {
-    pub fn new_with_init<P: AsRef<Path>>(path: P) -> Result<Spc700> {
-        let spc = Spc::load(path)?;
+    pub fn new() -> Spc700 {
+        Spc700 {
+            reg: Register::new(0),
+            timer: [Timer::new(8000), Timer::new(8000), Timer::new(64000)],            
+            cycle_counter: 0,
+            total_cycles: 0,
+            is_stopped: false,
+        }
+    }
+
+    pub fn load(&mut self, p: &path::Path) -> Result<()> {
+        let spc = Spc::load(p)?;
         Ram::init(&spc.ram, &spc.ipl_rom);
         DSP::init(&spc.regs);
 
@@ -391,24 +402,11 @@ impl Spc700 {
             }
         });
         let register = Register::new_with_init(&spc);
-        
-        Ok(Spc700 {
-            reg: register,
-            timer: [timer[0], timer[1], timer[2]],            
-            cycle_counter: 0,
-            total_cycles: 0,
-            is_stopped: false,
-        })
-    }
+       
+        self.reg = register;
+        self.timer.copy_from_slice(&timer[..]);
 
-    pub fn new(init_pc: u16) -> Spc700 {
-        Spc700 {
-            reg: Register::new(init_pc),
-            timer: [Timer::new(8000), Timer::new(8000), Timer::new(64000)],            
-            cycle_counter: 0,
-            total_cycles: 0,
-            is_stopped: false,
-        }
+        Ok(())
     }
 
     pub fn next_sample(&mut self) -> (i16, i16) {        
