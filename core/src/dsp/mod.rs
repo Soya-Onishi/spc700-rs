@@ -445,6 +445,7 @@ impl DSP {
         }
     }
 
+    #[allow(dead_code)]
     pub fn reset(&mut self) -> () {
         for mut blk in self.blocks.iter_mut() {    
             blk.reg.voice_end = true;
