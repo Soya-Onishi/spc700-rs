@@ -79,7 +79,7 @@ impl Ram {
 
         let mut global = Self::global();
         global.ram.copy_from_slice(ram);
-        global.ram[0xFFC0..].copy_from_slice(&BOOT_ROM_DATA[..]);
+        global.ram[0xFFC0..].copy_from_slice(&rom[..]);
         global.ram_writable = ram_writable;
         global.rom_writable = rom_writable;
         global.dsp_addr = dsp_addr; 
