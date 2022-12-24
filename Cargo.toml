@@ -1,18 +1,5 @@
-[package]
-name = "spc700-rs"
-version = "0.1.0"
-authors = ["soya <ohnishi.soya@arc.cs.okayama-u.ac.jp>"]
-edition = "2021"
-
-[profile.release]
-debug = 1
-
-[dependencies]
-spc = "0.1.1"
-cpal = "0.14"
-hound = "3.5"
-clap = { version = "4.0", features = ["derive"] }
-log = "0.4"
-env_logger = "0.10"
-typenum = "1.15"
-array-macro = "2.1"
+[workspace]
+members = [
+  "core",
+  "cli",
+]
