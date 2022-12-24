@@ -1,7 +1,7 @@
 use crate::dsp::DSP;
 use crate::processor::timer::Timer;
 
-const BOOT_ROM_DATA: [u8; 64] = [
+pub const BOOT_ROM_DATA: [u8; 64] = [
     0xCD, 0xEF,       // mov  x, EF    
     0xBD,             // mov  sp, x
     0xE8, 0x00,       // mov  a, 00
