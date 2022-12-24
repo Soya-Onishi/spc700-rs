@@ -74,7 +74,7 @@ impl DSPBlock {
         // filter sample
         let nibble_idx = ((self.pitch_counter >> 12) & 0x0F) as usize;
         let gaussian_idx = (self.pitch_counter >> 4) & 0xFF;
-        let sample = gaussian_interpolation(gaussian_idx as usize, &self.buffer[nibble_idx..(nibble_idx + 3)]);        
+        let sample = gaussian_interpolation(gaussian_idx as usize, &self.buffer[nibble_idx..(nibble_idx + 4)]);        
 
         // envelope        
         let is_brr_end = brr_info.end == BRREnd::Mute;        
