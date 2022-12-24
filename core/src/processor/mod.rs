@@ -2033,7 +2033,7 @@ impl Spc700 {
         OperationResult::new((), 1)
     }
 
-    pub fn count_cycles(&mut self, cycle_count: u16) -> () {        
+    fn count_cycles(&mut self, cycle_count: u16) -> () {        
         DSP::global().cycles(cycle_count);
         self.timer.iter_mut().for_each(|timer| timer.cycles(cycle_count));
         self.cycle_counter += cycle_count as u64;

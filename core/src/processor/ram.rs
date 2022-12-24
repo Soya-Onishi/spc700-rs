@@ -1,8 +1,6 @@
 use crate::dsp::DSP;
 use crate::processor::timer::Timer;
 
-use std::fs;
-
 const BOOT_ROM_DATA: [u8; 64] = [
     0xCD, 0xEF,       // mov  x, EF    
     0xBD,             // mov  sp, x
@@ -92,20 +90,6 @@ impl Ram {
     #[inline]
     pub fn global() -> &'static mut Ram {
         unsafe { &mut RAM }
-    }
-
-    pub fn load(&mut self, filename: String, start_pos: u16, set_pos: u16) {
-        let binaries = fs::read(filename).expect("not found");
-        let start_pos = start_pos as usize;
-        let set_pos = set_pos as usize;
-
-        for (offset, bin) in binaries[start_pos..].iter().enumerate() {
-            if bin.clone() != 0 {
-                // println!("Loading...[{:#06x}] <= {:#04x}", set_pos + offset, bin);
-            }
-
-            self.ram[set_pos + offset] = bin.clone();
-        }
     }
 
     pub fn read(&mut self, addr: u16, timer: &mut [Timer; 3]) -> u8 {
