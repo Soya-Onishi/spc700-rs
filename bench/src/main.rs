@@ -2,7 +2,7 @@ use spc700_core::SPC700;
 use std::path::Path;
 use std::time::SystemTime;
 
-const COUNT_UPPER: usize = 100;
+const COUNT_UPPER: usize = 1000;
 const COUNT_PITCH: usize = 32000;
 
 fn main() {

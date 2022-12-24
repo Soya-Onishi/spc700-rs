@@ -246,6 +246,7 @@ impl DSP {
         dsp.echo_feedback_volume = regs[0x0D];
         dsp.echo_ring_buffer_addr = (regs[0x6D] as u16) << 8;
         dsp.echo_buffer_size = regs[0x7D];
+        dsp.echo_buf_length = calc_echo_buffer_size(regs[0x7D]);
         
         let mut fir_coefficients = [0; 8];
         (0..8).map(|upper: usize| regs[(upper << 4) | 0x0F])
@@ -282,22 +283,17 @@ impl DSP {
             Some(blk.sample_out)
         });
 
-        let (left, right) = combine_all_sample(&self.blocks, self);         
+        let (left, right) = combine_all_sample(&self.blocks);         
         let (echo_left, echo_right) = combine_echo(&self.blocks);        
         let (left_echo, right_echo) = echo_process(echo_left, echo_right, self);
 
         let left_out = (left as i32) + (left_echo as i32);
         let right_out = (right as i32) + (right_echo as i32);
-        let clamp = |v: i32| -> i16 {
-            if v > 0x7FFF { 0x7FFF }
-            else if v < -0x8000 { -0x8000 }
-            else { v as i16 }
-        };        
         
         self.flag_is_modified = false;
         self.counter = (self.counter + 1) % CYCLE_RANGE;
-        self.sample_left_out = clamp(left_out);
-        self.sample_right_out = clamp(right_out);
+        self.sample_left_out = left_out as i16;
+        self.sample_right_out = right_out as i16; 
     }
 
     pub fn read_from_register(&mut self, addr: usize) -> u8 {
@@ -435,7 +431,10 @@ impl DSP {
             }
             (  0x5, 0xD) => self.table_addr = data,
             (  0x6, 0xD) => self.echo_ring_buffer_addr = (data as u16) << 8,
-            (  0x7, 0xD) => self.echo_buffer_size = data,      
+            (  0x7, 0xD) => {
+                self.echo_buffer_size = data;
+                self.echo_buf_length = calc_echo_buffer_size(data);
+            },
             (upper, 0xE) => self.unused_e[upper] = data,
             (upper, 0xF) => {
                 self.fir_left.filter[upper] = (data as i8) as i16;
@@ -473,43 +472,22 @@ impl DSP {
 }
 
 // TODO: need echo accumulate implementation
-fn combine_all_sample(blocks: &[DSPBlock], dsp: &DSP) -> (i16, i16) {
-    fn combine(samples: impl Iterator<Item = i32>, master_vol: i8) -> i16 {
-        let acc: i32 = samples.fold(0, |acc, sample| {
-            let sum = acc + sample;
-            sum.min(0x7FFF).max(-0x8000)
-        });
-
-        let out = (acc * (master_vol as i32)) >> 7;
-        let out = out.min(0x7FFF).max(-0x8000); 
-
-        out as i16
-    }
+fn combine_all_sample(blocks: &[DSPBlock]) -> (i16, i16) {
+    let dsp = DSP::global();
 
     if dsp.is_mute {
         (0, 0)
     } else {
-        let lefts = blocks.iter().map(|blk| blk.sample_left as i32);
-        let rights = blocks.iter().map(|blk| blk.sample_right as i32);
-        let left = combine(lefts, dsp.master_vol_left as i8);
-        let right = combine(rights, dsp.master_vol_right as i8);
+        let left = (blocks.iter().map(|blk| blk.sample_left as i32).sum::<i32>() * dsp.master_vol_left as i32 >> 7) as i16;
+        let right = (blocks.iter().map(|blk| blk.sample_right as i32).sum::<i32>() * dsp.master_vol_right as i32 >> 7) as i16; 
 
         (left, right)
     } 
 }
 
 fn combine_echo(blocks: &[DSPBlock]) -> (i16, i16) {
-    fn combine(samples: impl Iterator<Item = i32>) -> i32 {
-        samples.fold(0, |acc, sample| {
-            let sum = acc + sample;
-            sum.min(0x7FFF).max(-0x8000)
-        })
-    }
-
-    let lefts = blocks.iter().map(|blk| blk.echo_left as i32);
-    let rights = blocks.iter().map(|blk| blk.echo_right as i32);
-    let left = combine(lefts);
-    let right = combine(rights);
+    let left = blocks.iter().map(|blk| blk.echo_left as i32).sum::<i32>();
+    let right = blocks.iter().map(|blk| blk.echo_right as i32).sum::<i32>();
 
     (left as i16, right as i16)
 }
@@ -526,14 +504,13 @@ fn echo_process(left: i16, right: i16, dsp: &mut DSP) -> (i16, i16) {
         let right_lower = right_new_echo as u8;
         let right_upper = (right_new_echo >> 8) as u8;
 
-        [left_lower, left_upper, right_lower, right_upper].iter().zip(0..).for_each (|(&sample, idx)| {
-            Ram::global().ram[buffer_addr + idx] = sample;
-        });
+        let ram = &mut Ram::global().ram[buffer_addr..];
+        ram[0] = left_lower;
+        ram[1] = left_upper;
+        ram[2] = right_lower;
+        ram[3] = right_upper; 
     }
-
-    if dsp.echo_pos == 0 {
-        dsp.echo_buf_length = (dsp.echo_buffer_size as u16 & 0x0F) * 0x800;
-    }
+ 
     dsp.echo_pos += 4;
     if dsp.echo_pos >= dsp.echo_buf_length {
         dsp.echo_pos = 0;
@@ -573,4 +550,8 @@ fn vec_to_u8(bools: impl Iterator<Item = bool>) -> u8 {
         .zip(0..)
         .map(|(flag, idx)| flag << idx)
         .sum()
+}
+
+fn calc_echo_buffer_size(data: u8) -> u16 {
+    (data as u16 & 0x0F) * 0x800
 }
