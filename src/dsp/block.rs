@@ -218,11 +218,9 @@ fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], s
         .map(|(table_idx, &sample)| { 
             (gaussian_table::GAUSSIAN_TABLE[table_idx] as i32 * sample as i32) >> 10
         })
-        .sum::<i32>()
-        .min(0x7FFF)
-        .max(-0x8000);
+        .sum::<i32>();
     
-    (out as i16) & !1
+    out as i16
 }
 
 fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_info: &BRRInfo) -> () {    
