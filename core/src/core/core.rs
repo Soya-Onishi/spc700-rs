@@ -1,3 +1,7 @@
+mod ram;
+mod timer;
+mod register;
+
 extern crate spc;
 
 use super::ram::*;
