@@ -13,7 +13,7 @@ use crate::processor::ram::Ram;
 use block::DSPBlock;
 use brr::FilterType;
 
-const SAMPLE_BUFFER_SIZE: usize = 32;
+const SAMPLE_BUFFER_SIZE: usize = 16 + 3;
 pub const CYCLE_RANGE: u16 = 30720;
 
 static mut GLOBAL_DSP: DSP = DSP::new();

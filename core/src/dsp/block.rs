@@ -72,9 +72,9 @@ impl DSPBlock {
         let (next_pitch, require_next_block) = self.pitch_counter.overflowing_add(step);        
         
         // filter sample
-        let nibble_idx = ((self.pitch_counter >> 12) & 0x0F) as i8;
+        let nibble_idx = ((self.pitch_counter >> 12) & 0x0F) as usize;
         let gaussian_idx = (self.pitch_counter >> 4) & 0xFF;
-        let sample = gaussian_interpolation(gaussian_idx as usize, &self.buffer, self.base_idx as i8 + nibble_idx);        
+        let sample = gaussian_interpolation(gaussian_idx as usize, &self.buffer[nibble_idx..(nibble_idx + 3)]);        
 
         // envelope        
         let is_brr_end = brr_info.end == BRREnd::Mute;        
@@ -129,9 +129,8 @@ impl DSPBlock {
             let addr = self.src_addr as usize;                
             let brr_block = &Ram::global().ram[addr..addr + 9];                
 
-            self.base_idx = (self.base_idx + 16) % SAMPLE_BUFFER_SIZE;
             self.brr_info = BRRInfo::new(brr_block[0]);                
-            generate_new_sample(&brr_block[1..], &mut self.buffer, &self.brr_info, self.base_idx);
+            generate_new_sample(&brr_block[1..], &mut self.buffer, &self.brr_info);
         }
 
         // output sample of left and right
@@ -166,9 +165,8 @@ impl DSPBlock {
         let loop1 = Ram::global().read_ram(table_addr + 3) as u16;
 
         self.pitch_counter = 0x0000;
-                
+ 
         self.buffer.fill(0);
-        self.base_idx = 0;
 
         self.start_addr = start0 | (start1 << 8);                
         self.loop_addr = loop0 | (loop1 << 8);
@@ -178,9 +176,8 @@ impl DSPBlock {
         let addr = self.src_addr as usize;                
         let brr_block = &Ram::global().ram[addr..addr + 9];                
 
-        self.base_idx = (self.base_idx + 16) % SAMPLE_BUFFER_SIZE;
         self.brr_info = BRRInfo::new(brr_block[0]);                
-        generate_new_sample(&brr_block[1..], &mut self.buffer, &self.brr_info, self.base_idx);
+        generate_new_sample(&brr_block[1..], &mut self.buffer, &self.brr_info);
     }
 }
 
@@ -201,34 +198,24 @@ fn generate_additional_pitch(reg: &DSPRegister, before_out: Option<i16>) -> u16 
     }
 }
 
-fn gaussian_interpolation(base_idx: usize, buffer: &[i16; SAMPLE_BUFFER_SIZE], sample_idx: i8) -> i16 {       
+fn gaussian_interpolation(base_idx: usize, buffer: &[i16]) -> i16 {       
     let table_idxs = [
         0x0FF - base_idx,
         0x1FF - base_idx,
         0x100 + base_idx,
         0x000 + base_idx,
-    ];
+    ]; 
 
-    let buffer_idx_from = (sample_idx - 3).rem_euclid(SAMPLE_BUFFER_SIZE as i8) as usize;
-    let buffer_idxs = [
-        (buffer_idx_from + 0) % SAMPLE_BUFFER_SIZE,
-        (buffer_idx_from + 1) % SAMPLE_BUFFER_SIZE,
-        (buffer_idx_from + 2) % SAMPLE_BUFFER_SIZE,
-        (buffer_idx_from + 3) % SAMPLE_BUFFER_SIZE,
-    ];
-
-    let out = table_idxs.into_iter().zip(buffer_idxs.into_iter())
-        .map(|(table_idx, buffer_idx)| { 
-            (gaussian_table::GAUSSIAN_TABLE[table_idx] as i32 * buffer[buffer_idx] as i32) >> 10
+    let out = table_idxs.into_iter().zip(buffer.into_iter())
+        .map(|(table_idx, &sample)| { 
+            (gaussian_table::GAUSSIAN_TABLE[table_idx] as i32 * sample as i32) >> 10
         })
-        .sum::<i32>()
-        .min(0x7FFF)
-        .max(-0x8000);
+        .sum::<i32>();
     
-    (out as i16) & !1
+    out as i16
 }
 
-fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_info: &BRRInfo, base_idx: usize) -> () {    
+fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_info: &BRRInfo) -> () {    
     fn no_filter(sample: i32, _old: i32, _older: i32) -> i32 {
         sample
     }
@@ -261,10 +248,10 @@ fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_
     };
 
     fn shift_more_than_12(nibble: i8, _shamt: i32) -> i32 {
-            // FullSNESではshamt > 12の場合は
-            // nibble = nibble >> 3との記載がある。
-            // 11の左シフトが必要か確認
-            ((nibble as i8) >> 3) as i32
+        // FullSNESではshamt > 12の場合は
+        // nibble = nibble >> 3との記載がある。
+        // 11の左シフトが必要か確認
+        ((nibble as i8) >> 3) as i32
     }
 
     fn normal_shift(nibble: i8, shamt: i32) -> i32 {
@@ -273,20 +260,22 @@ fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_
 
     let shift = if brr_info.shift_amount > 12 { shift_more_than_12 } else { normal_shift };
 
-    let first_older_idx = (base_idx as i32 - 2).rem_euclid(SAMPLE_BUFFER_SIZE as i32) as usize;
-    let mut older = buffer[first_older_idx % SAMPLE_BUFFER_SIZE] as i32;
-    let mut old = buffer[(first_older_idx + 1) % SAMPLE_BUFFER_SIZE] as i32;
+    let mut old = buffer[SAMPLE_BUFFER_SIZE - 3];
+    let mut older = buffer[SAMPLE_BUFFER_SIZE - 2];
+    let oldest = buffer[SAMPLE_BUFFER_SIZE - 1];
+    buffer[0] = oldest;
+    buffer[1] = older;
+    buffer[2] = old;
 
-    nibbles.enumerate().for_each(|(idx, nibble)| {
+    nibbles.zip(3..).for_each(|(nibble, idx)| {
         let shamt = brr_info.shift_amount as i32;
         let sample = shift(nibble, shamt);
-            
-        let sample = filter(sample, old, older);
-        let sample = sample.min(0x7FFF).max(-0x8000); 
-        let sample = ((sample as i16) << 1) >> 1;       
-        
-        buffer[(base_idx + idx) as usize] = sample;
+ 
+        let sample = filter(sample, old as i32, older as i32);
+        let sample = ((sample as i16) << 1) >> 1; 
+ 
+        buffer[idx] = sample;
         older = old;
-        old = sample as i32;
+        old = sample;
     }); 
 }
