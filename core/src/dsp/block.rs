@@ -260,9 +260,9 @@ fn generate_new_sample(brrs: &[u8], buffer: &mut [i16; SAMPLE_BUFFER_SIZE], brr_
 
     let shift = if brr_info.shift_amount > 12 { shift_more_than_12 } else { normal_shift };
 
-    let mut old = buffer[SAMPLE_BUFFER_SIZE - 3];
+    let mut old = buffer[SAMPLE_BUFFER_SIZE - 1];
     let mut older = buffer[SAMPLE_BUFFER_SIZE - 2];
-    let oldest = buffer[SAMPLE_BUFFER_SIZE - 1];
+    let oldest = buffer[SAMPLE_BUFFER_SIZE - 3];
     buffer[0] = oldest;
     buffer[1] = older;
     buffer[2] = old;
