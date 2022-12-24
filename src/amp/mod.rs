@@ -73,8 +73,8 @@ fn build_stream<T: cpal::Sample + std::marker::Send + 'static>(
 
   let error_callback = |err| eprintln!("an error occurred on stream: {}", err);  
   let data_callback = move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-    for dsts in data.chunks_mut(channels) {
-      dsts.fill(rx.recv().unwrap());
+    for (dst, sample) in data.chunks_mut(channels).zip(rx.iter()) {
+       dst.fill(sample);
     }
   };
 
