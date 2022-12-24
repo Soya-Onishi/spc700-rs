@@ -13,10 +13,11 @@ fn main() {
     spc.load(&Path::new(filename)).unwrap();
 
     let mut times = Vec::new();
+    let mut recv: (i16, i16) = (0, 0);
     for _ in 0..COUNT_UPPER {
         let before = SystemTime::now();
         for _ in 0..COUNT_PITCH {
-            spc.next_sample();
+            unsafe { std::ptr::write_volatile(&mut recv, spc.next_sample()); }
         }
         let duration = before.elapsed().unwrap();
         times.push(duration);

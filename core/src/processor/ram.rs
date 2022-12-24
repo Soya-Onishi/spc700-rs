@@ -47,7 +47,6 @@ static mut RAM: Ram = Ram::new();
 
 pub struct Ram {
     pub ram: [u8; 0x10000],
-    rom: [u8; 64],
     pub read_log: Vec<(u16, u8)>,
     pub write_log: Vec<(u16, u8)>,
 
@@ -61,7 +60,6 @@ impl Ram {
     pub const fn new() -> Ram {
         Ram {
             ram: [0; 0x10000],
-            rom: BOOT_ROM_DATA,
             read_log: Vec::new(),
             write_log: Vec::new(),
 
@@ -81,7 +79,7 @@ impl Ram {
 
         let mut global = Self::global();
         global.ram.copy_from_slice(ram);
-        global.rom.copy_from_slice(rom);
+        global.ram[0xFFC0..].copy_from_slice(&BOOT_ROM_DATA[..]);
         global.ram_writable = ram_writable;
         global.rom_writable = rom_writable;
         global.dsp_addr = dsp_addr; 
@@ -96,9 +94,7 @@ impl Ram {
         log::debug!("ram[r] addr: {:06x}", addr);
         if (0x00F0..=0x00FF).contains(&addr) {
             self.read_from_io(addr as usize, timer)
-        } else if(0xFFC0..=0xFFFF).contains(&addr) && !self.rom_writable {
-            self.rom[(addr - 0xFFC0) as usize]
-        } else {
+        }  else {
             self.ram[addr as usize]
         }
     }
