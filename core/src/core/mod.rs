@@ -4,10 +4,10 @@ mod register;
 
 extern crate spc;
 
-use super::ram::*;
-use super::register::*;
+use ram::*;
+use register::*;
 use crate::dsp::DSP;
-use crate::emulator::timer::Timer;
+use timer::Timer;
 
 use std::io::Result;
 use std::path::Path;
