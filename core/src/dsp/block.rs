@@ -5,7 +5,7 @@ use super::gaussian_table;
 use super::SAMPLE_BUFFER_SIZE;
 use super::FilterType;
 
-use crate::emulator::ram::Ram;
+use crate::processor::ram::Ram;
 
 #[derive(Clone)]
 pub struct DSPBlock {

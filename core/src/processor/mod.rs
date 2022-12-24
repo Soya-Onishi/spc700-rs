@@ -1,6 +1,6 @@
-mod ram;
-mod timer;
-mod register;
+pub(crate) mod ram;
+pub(crate) mod timer;
+pub(crate) mod register;
 
 extern crate spc;
 

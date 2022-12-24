@@ -1,5 +1,5 @@
 use crate::dsp::DSP;
-use crate::emulator::timer::Timer;
+use crate::processor::timer::Timer;
 
 use std::fs;
 

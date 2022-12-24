@@ -9,7 +9,7 @@ use std::u16;
 
 use array_macro::array;
 
-use crate::emulator::ram::Ram;
+use crate::processor::ram::Ram;
 use block::DSPBlock;
 use brr::FilterType;
 
