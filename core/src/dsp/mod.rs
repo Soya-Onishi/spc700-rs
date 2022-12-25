@@ -478,8 +478,11 @@ fn combine_all_sample(blocks: &[DSPBlock]) -> (i16, i16) {
     if dsp.is_mute {
         (0, 0)
     } else {
-        let left = (blocks.iter().map(|blk| blk.sample_left as i32).sum::<i32>() * dsp.master_vol_left as i32 >> 7) as i16;
-        let right = (blocks.iter().map(|blk| blk.sample_right as i32).sum::<i32>() * dsp.master_vol_right as i32 >> 7) as i16; 
+        let left = blocks.iter().map(|blk| blk.sample_left as i32).sum::<i32>() * dsp.master_vol_left as i32 >> 7;
+        let right = blocks.iter().map(|blk| blk.sample_right as i32).sum::<i32>() * dsp.master_vol_right as i32 >> 7;
+
+        let left = left.min(0x7FFF).max(-0x8000) as i16;
+        let right = right.min(0x7FFF).max(-0x8000) as i16;
 
         (left, right)
     } 
@@ -489,7 +492,10 @@ fn combine_echo(blocks: &[DSPBlock]) -> (i16, i16) {
     let left = blocks.iter().map(|blk| blk.echo_left as i32).sum::<i32>();
     let right = blocks.iter().map(|blk| blk.echo_right as i32).sum::<i32>();
 
-    (left as i16, right as i16)
+    let left = left.min(0x7FFF).max(-0x8000) as i16;
+    let right = right.min(0x7FFF).max(-0x8000) as i16;
+
+    (left, right)
 }
 
 fn echo_process(left: i16, right: i16, dsp: &mut DSP) -> (i16, i16) {    
